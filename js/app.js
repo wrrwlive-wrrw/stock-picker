@@ -12,6 +12,7 @@ const ACCOUNTS = [
 const MENUS = {
   admin: [
     {id:'market',label:'🏠 大盘总览'},
+    {id:'daily',label:'🤖 每日分析'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
@@ -22,6 +23,7 @@ const MENUS = {
   ],
   vip: [
     {id:'market',label:'🏠 大盘总览'},
+    {id:'daily',label:'🤖 每日分析'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
@@ -31,6 +33,7 @@ const MENUS = {
   ],
   user: [
     {id:'market',label:'🏠 大盘总览'},
+    {id:'daily',label:'🤖 每日分析'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
@@ -86,6 +89,7 @@ function navigate(page) {
   const content = document.getElementById('mainContent');
   switch(page) {
     case 'market': renderMarket(content); break;
+    case 'daily': renderDailyAI(content); break;
     case 'watchlist': renderWatchlist(content); break;
     case 'methodology': renderMethodology(content); break;
     case 'macro': renderMacro(content); break;

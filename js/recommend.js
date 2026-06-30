@@ -120,7 +120,8 @@ function renderAvoidList() {
         <td style="font-size:12px">${a.examples}</td>
       </tr>`).join('')}
     </table>
-  </div>`;
+  </div>
+  ${renderOvervaluedWarning()}`;
 }
 
 function renderOperationTips() {
@@ -155,6 +156,112 @@ function renderOperationTips() {
         • 回避：高位题材、地产链<br>
         • 建议仓位：60-70%</p>
       </div>
+    </div>
+  </div>`;
+}
+
+// 高估值/山顶股风险警告模块
+function renderOvervaluedWarning() {
+  const overvalued = [
+    {code:'sz300999',name:'金龙鱼',price:'38.5',pe:'68.2',peAvg:'25-35',
+     pb:'4.8',high52w:'62.3',fromHigh:'-38%',position:'高位回落',
+     risk:'PE远超行业均值，利润增速放缓，前期高点套牢盘重'},
+    {code:'sh603259',name:'药明康德',price:'45.2',pe:'52.1',peAvg:'20-30',
+     pb:'3.9',high52w:'85.6',fromHigh:'-47%',position:'山顶下跌中途',
+     risk:'PE偏高+行业政策不确定+外资持续减持'},
+    {code:'sz300760',name:'迈瑞医疗',price:'280',pe:'45.3',peAvg:'30-38',
+     pb:'12.5',high52w:'380',fromHigh:'-26%',position:'高位震荡回落',
+     risk:'PB过高，增速边际放缓，估值修复压力大'},
+    {code:'sh688111',name:'金山办公',price:'320',pe:'95.8',peAvg:'40-60',
+     pb:'18.2',high52w:'530',fromHigh:'-40%',position:'估值泡沫破裂',
+     risk:'PE近100倍严重透支未来，AI预期已充分消化'},
+    {code:'sz002475',name:'立讯精密',price:'38.5',pe:'35.2',peAvg:'20-28',
+     pb:'5.8',high52w:'52.8',fromHigh:'-27%',position:'高位回调',
+     risk:'消费电子周期下行，PE高于历史中位数，果链依赖风险'},
+    {code:'sh600036',name:'招商银行',price:'38.2',pe:'6.5',peAvg:'5-8',
+     pb:'0.95',high52w:'41.5',fromHigh:'-8%',position:'相对合理',
+     risk:'银行股PE低但属正常，PB<1说明市场对资产质量存疑'},
+  ];
+  return `<div class="card" style="border:1px solid #ea3943">
+    <div class="card-title" style="color:#ea3943">
+      ⛔ 高估值/山顶股警告 — 建议不购买
+    </div>
+    <div class="tip-box" style="border-left-color:#ea3943;background:#1c1014">
+      <b>核心原则：</b>再好的股票，买在山顶也是亏钱。
+      以下股票存在估值严重偏离、处于历史高位回落阶段，
+      主力资金已撤退，建议坚决不碰！
+    </div>
+    ${renderOvervaluedTable(overvalued)}
+    ${renderValuationRules()}
+  </div>`;
+}
+
+function renderOvervaluedTable(list) {
+  return `<table class="data-table" style="margin-top:12px">
+    <tr>
+      <th>代码</th><th>名称</th><th>现价</th><th>PE(动)</th>
+      <th>行业PE区间</th><th>PB</th><th>52周高点</th>
+      <th>距高点</th><th>位置判断</th><th>风险说明</th>
+    </tr>
+    ${list.map(s => {
+      const peNum = parseFloat(s.pe);
+      const peHigh = parseFloat(s.peAvg.split('-')[1]);
+      const isOverPE = peNum > peHigh * 1.3;
+      const peClass = isOverPE ? 'down' : 'flat';
+      return `<tr>
+        <td>${s.code}</td>
+        <td><b>${s.name}</b></td>
+        <td>${s.price}</td>
+        <td class="${peClass}"><b>${s.pe}</b></td>
+        <td>${s.peAvg}</td>
+        <td>${s.pb}</td>
+        <td>${s.high52w}</td>
+        <td class="down">${s.fromHigh}</td>
+        <td><span class="factor-tag tag-negative">${s.position}</span></td>
+        <td style="font-size:11px;color:#ea3943">${s.risk}</td>
+      </tr>`;
+    }).join('')}
+  </table>`;
+}
+
+function renderValuationRules() {
+  return `<div class="method-section" style="margin-top:16px">
+    <h3 style="color:#f0883e">如何判断"山顶股"？</h3>
+    <div class="factor-grid">
+      <div class="factor-card">
+        <h4>PE严重偏高</h4>
+        <p>• 当前PE超过行业平均值30%以上<br>
+        • PE>80倍且无对应高增速支撑<br>
+        • 与历史PE中位数比偏离>50%<br>
+        <span class="down">→ 说明股价透支未来数年业绩</span></p>
+      </div>
+      <div class="factor-card">
+        <h4>PB严重偏高</h4>
+        <p>• PB>10倍（非科技/互联网公司）<br>
+        • 轻资产公司PB>20倍需警惕<br>
+        • 对比同行业PB高出2倍以上<br>
+        <span class="down">→ 资产泡沫化，一旦杀估值跌幅巨大</span></p>
+      </div>
+      <div class="factor-card">
+        <h4>距52周高点跌幅</h4>
+        <p>• 从高点回落20%-50%仍在下跌通道<br>
+        • 高位套牢盘重，反弹就有抛压<br>
+        • 没有明确止跌信号前不抄底<br>
+        <span class="down">→ 下跌趋势中接飞刀=送钱</span></p>
+      </div>
+      <div class="factor-card">
+        <h4>主力资金撤退</h4>
+        <p>• 北向资金/机构连续减仓<br>
+        • 成交量持续萎缩<br>
+        • 大股东/高管减持套现<br>
+        <span class="down">→ 聪明钱已跑，散户不要接盘</span></p>
+      </div>
+    </div>
+    <div class="tip-box" style="border-left-color:#ea3943;margin-top:12px">
+      <b>投资铁律：</b>宁可错过，不要做错。
+      高估值股票即使短期还能涨，风险收益比极差。
+      当PE>行业均值50%、距高点跌幅>20%仍无止跌迹象时，
+      坚决不买！等待估值回归合理区间再考虑。
     </div>
   </div>`;
 }
