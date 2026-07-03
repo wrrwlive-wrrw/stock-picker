@@ -1,22 +1,55 @@
 // 每日AI智能分析模块
 const AI_API_URL = 'https://api.siliconflow.cn/v1/chat/completions';
-const AI_API_KEY = 'sk-fefvaeqdekfkqazrbgijlvbhbjhauikfcikgmbjicihvkcez';
 const AI_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
+
+function getAIKey() {
+  return localStorage.getItem('ai_api_key') || '';
+}
+function saveAIKey(k) {
+  localStorage.setItem('ai_api_key', k);
+}
 
 function renderDailyAI(el) {
   const today = new Date().toISOString().slice(0, 10);
   const cached = getDailyCache(today);
+  const savedKey = getAIKey();
+  const keyMask = savedKey ? savedKey.slice(0,6)+'****'+savedKey.slice(-4) : '未配置';
   el.innerHTML = `
     <div class="card">
       <div class="card-title">🤖 每日智能分析</div>
       <p style="color:#8b949e;font-size:13px">AI自动分析当日行情、国际局势、美股动态，推荐10只主线股票</p>
+      <div style="margin-top:8px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px">
+        <div style="font-size:12px;color:#8b949e;margin-bottom:6px">
+          当前API Key：<span style="color:#58a6ff">${keyMask}</span>
+          （<a href="https://cloud.siliconflow.cn/account/ak" target="_blank" style="color:#58a6ff">免费申请硅基流动Key</a>）
+        </div>
+        <div style="display:flex;gap:6px">
+          <input type="password" id="aiKeyInput" placeholder="粘贴sk-开头的API Key" style="flex:1;padding:6px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
+          <button class="btn btn-blue btn-sm" onclick="setAIKey()">保存Key</button>
+        </div>
+      </div>
       <div style="margin-top:12px;display:flex;gap:10px">
         <button class="btn btn-primary" onclick="generateDailyAnalysis()" id="aiBtn">生成今日分析</button>
-        <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : '点击按钮开始分析'}</span>
+        <button class="btn btn-blue" onclick="showFallbackNow()">查看离线示例</button>
+        <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : (savedKey ? '点击按钮开始分析' : '未配置API Key，将显示离线分析')}</span>
       </div>
     </div>
     <div id="dailyResult">${cached ? cached : ''}</div>
   `;
+}
+
+function setAIKey() {
+  const v = document.getElementById('aiKeyInput').value.trim();
+  if (!v) { alert('请输入API Key'); return; }
+  if (!v.startsWith('sk-')) { alert('API Key格式不正确，应以sk-开头'); return; }
+  saveAIKey(v);
+  alert('API Key已保存');
+  renderDailyAI(document.getElementById('mainContent'));
+}
+
+function showFallbackNow() {
+  document.getElementById('dailyResult').innerHTML = getFallbackAnalysis();
+  document.getElementById('aiStatus').textContent = '已显示离线示例数据';
 }
 
 function getDailyCache(date) {
@@ -31,6 +64,14 @@ async function generateDailyAnalysis() {
   const btn = document.getElementById('aiBtn');
   const status = document.getElementById('aiStatus');
   const result = document.getElementById('dailyResult');
+  const apiKey = getAIKey();
+
+  if (!apiKey) {
+    result.innerHTML = getFallbackAnalysis();
+    status.textContent = '未配置API Key，显示离线示例分析';
+    return;
+  }
+
   btn.disabled = true;
   status.textContent = 'AI分析中，请稍候...';
   result.innerHTML = '<div class="card"><p style="color:#58a6ff">正在调用AI分析引擎...</p></div>';
@@ -41,7 +82,7 @@ async function generateDailyAnalysis() {
   try {
     const res = await fetch(AI_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
         model: AI_MODEL, temperature: 0.7, max_tokens: 2000,
         messages: [
@@ -50,16 +91,29 @@ async function generateDailyAnalysis() {
         ]
       })
     });
+    if (!res.ok) {
+      const errText = await res.text();
+      let errMsg = '状态码 ' + res.status;
+      if (res.status === 401) errMsg = 'API Key无效或已过期，请重新配置';
+      else if (res.status === 429) errMsg = '调用频率超限，请稍后再试';
+      else if (res.status === 403) errMsg = 'API Key权限不足或余额不足';
+      throw new Error(errMsg + ' — ' + errText.slice(0,120));
+    }
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || '分析生成失败，请重试';
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('AI返回内容为空');
     const html = formatAIResult(text);
     result.innerHTML = html;
     saveDailyCache(new Date().toISOString().slice(0,10), html);
     status.textContent = '分析完成';
   } catch(e) {
     console.error('AI分析失败', e);
-    result.innerHTML = getFallbackAnalysis();
-    status.textContent = 'API暂不可用，显示离线分析';
+    result.innerHTML = `<div class="card" style="border-color:#da3633">
+      <div class="card-title" style="color:#ea3943">⚠️ AI调用失败</div>
+      <p style="color:#ea3943;font-size:13px">${e.message || e}</p>
+      <p style="color:#8b949e;font-size:12px;margin-top:8px">已切换到离线示例分析：</p>
+    </div>` + getFallbackAnalysis();
+    status.textContent = 'API调用失败，显示离线分析';
   }
   btn.disabled = false;
 }
