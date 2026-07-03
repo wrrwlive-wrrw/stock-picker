@@ -104,3 +104,50 @@ function generateKlineData(basePrice, days) {
   }
   return data;
 }
+
+// 东方财富API封装
+const EM_QUOTE_URL = 'https://push2.eastmoney.com/api/qt/stock/get';
+const EM_CAPITAL_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get';
+
+// 转换代码格式：sh600519 -> 1.600519, sz000858 -> 0.000858
+function toEMCode(code) {
+  if (code.startsWith('sh')) return '1.' + code.slice(2);
+  if (code.startsWith('sz')) return '0.' + code.slice(2);
+  return code;
+}
+
+// 获取东方财富详细行情
+async function fetchEMStockDetail(code) {
+  const cached = getCache('em_' + code);
+  if (cached) return cached;
+  try {
+    const emCode = toEMCode(code);
+    const fields = 'f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f163,f167,f168,f169,f170,f171,f173,f177,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192';
+    const url = `${CORS_PROXY}${encodeURIComponent(EM_QUOTE_URL+'?secid='+emCode+'&fields='+fields)}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.data) { setCache('em_'+code, json.data); return json.data; }
+  } catch(e) { console.warn('东方财富API失败', e); }
+  return null;
+}
+
+// 获取东方财富资金流向（近10日）
+async function fetchEMCapitalFlow(code) {
+  const cached = getCache('em_cap_' + code);
+  if (cached) return cached;
+  try {
+    const emCode = toEMCode(code);
+    const url = `${CORS_PROXY}${encodeURIComponent(EM_CAPITAL_URL+'?secid='+emCode+'&klt=101&lmt=10&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57')}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.data && json.data.klines) {
+      const result = json.data.klines.map(k => {
+        const p = k.split(',');
+        return {date:p[0], main:parseFloat(p[1])/1e8, super:parseFloat(p[2])/1e8, big:parseFloat(p[3])/1e8, mid:parseFloat(p[4])/1e8, small:parseFloat(p[5])/1e8};
+      });
+      setCache('em_cap_'+code, result);
+      return result;
+    }
+  } catch(e) { console.warn('资金流向API失败', e); }
+  return null;
+}
