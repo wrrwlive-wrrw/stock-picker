@@ -84,7 +84,7 @@ async function generateDailyAnalysis() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
-        model: AI_MODEL, temperature: 0.7, max_tokens: 2000,
+        model: AI_MODEL, temperature: 0.7, max_tokens: 4000,
         messages: [
           { role: 'system', content: getSystemPrompt() },
           { role: 'user', content: prompt }
@@ -123,8 +123,10 @@ function getSystemPrompt() {
 1. 简洁直接，不废话
 2. 必须给出具体股票代码和名称
 3. 结合国际局势、美股走势、政策面综合分析
-4. 每次必须推荐恰好10只股票，标注买入逻辑和目标价
-5. 用markdown格式输出，使用##标题分段`;
+4. 每次必须推荐恰好20只股票
+5. 对每只股票必须分析：换手率、主力资金动向、散户买入情况、财务风险、是否处于下跌通道、建议买入时点
+6. 用markdown格式输出，使用##标题分段
+7. 免责声明：提醒用户这是AI分析仅供参考，不构成投资建议`;
 }
 
 function buildDailyPrompt(today) {
@@ -142,26 +144,52 @@ function buildDailyPrompt(today) {
 ## 四、今日主线方向
 明确给出2-3条今日最强主线方向和逻辑
 
-## 五、今日推荐10只股票
-以表格形式列出：
-| 序号 | 代码 | 名称 | 所属主线 | 买入逻辑 | 目标价 | 止损价 |
+## 五、今日推荐20只股票（详细分析版）
+以表格形式列出，必须包含以下所有字段：
+| 序号 | 代码 | 名称 | 主线 | 买入理由 | 换手率 | 主力资金 | 散户情况 | 财务风险 | 趋势判断 | 建议买入点 | 目标价 | 止损价 |
+
+字段说明：
+- 换手率：预估当日换手率(%)，判断活跃度
+- 主力资金：主力今日净流入/流出(亿)，判断机构态度
+- 散户情况：散户是否在追高或撤退
+- 财务风险：低/中/高（结合PE、商誉、负债率）
+- 趋势判断：多头/空头/震荡，是否处于下跌通道
+- 建议买入点：具体的价位或时机（如"回踩MA20"、"跌破XX止损"）
 
 要求：
-- 10只股票必须覆盖不同主线
-- 必须有明确的股票代码（如600519、300750）
-- 给出具体的目标价和止损价
-- 买入逻辑简明扼要`;
+- 恰好20只股票，覆盖不同主线（AI、半导体、新能源、消费、军工、医药等）
+- 必须有明确的股票代码（如sh600519、sz300750）
+- 财务有风险或处于下跌通道的股票要明确标注"建议观望"
+- 高估值(PE>行业均值50%)的股票要提示风险
+- 结尾添加免责声明：本分析由AI生成，仅供参考，不构成投资建议，股市有风险入市需谨慎`;
 }
 
 // 将AI的markdown输出转为HTML
 function formatAIResult(text) {
   let html = text
     .replace(/## (.*)/g, '<div class="card"><div class="card-title">$1</div>')
-    .replace(/\| *序号/g, '<table class="data-table"><tr><th>序号</th>')
-    .replace(/\| *-+/g, '')
-    .replace(/\n\| *(\d+) *\| *([^|]*)\| *([^|]*)\| *([^|]*)\| *([^|]*)\| *([^|]*)\| *([^|]*)\|?/g,
-      '<tr><td>$1</td><td>$2</td><td><b>$3</b></td><td>$4</td><td style="font-size:11px">$5</td><td class="up">$6</td><td class="down">$7</td></tr>')
-    .replace(/\| *代码/g, '<th>代码</th><th>名称</th><th>主线</th><th>逻辑</th><th>目标价</th><th>止损</th></tr>')
+    .replace(/\| *序号[^|]*\| *代码[^\n]*/g,
+      '<table class="data-table" style="font-size:12px"><tr><th>序号</th><th>代码</th><th>名称</th><th>主线</th><th>买入理由</th><th>换手率</th><th>主力资金</th><th>散户</th><th>财务风险</th><th>趋势</th><th>买入点</th><th>目标价</th><th>止损</th></tr>')
+    .replace(/\| *-+[^\n]*/g, '')
+    .replace(/\n\| *(\d+) *\|([^\n]*)/g, function(match, no, rest) {
+      const cols = rest.split('|').filter(c => c.trim());
+      let row = '<tr><td>'+no+'</td>';
+      cols.forEach((c,i) => {
+        const v = c.trim();
+        let cls = '';
+        if (i === 1) row += '<td><b>'+v+'</b></td>';
+        else if (i === 5) row += '<td class="'+(v.includes('+')?'up':'down')+'">'+v+'</td>';
+        else if (i === 7) {
+          const rc = v==='高'?'down':v==='中'?'flat':'up';
+          row += '<td class="'+rc+'">'+v+'</td>';
+        }
+        else if (i === 10) row += '<td class="up">'+v+'</td>';
+        else if (i === 11) row += '<td class="down">'+v+'</td>';
+        else row += '<td style="font-size:11px">'+v+'</td>';
+      });
+      row += '</tr>';
+      return row;
+    })
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/\n- /g, '<br>• ')
     .replace(/\n/g, '<br>');
@@ -201,26 +229,56 @@ function getFallbackAnalysis() {
 
 function getFallbackStockTable() {
   const stocks = [
-    {no:1,code:'sz300308',name:'中际旭创',line:'AI算力',logic:'光模块龙头，AI算力核心受益',target:'180',stop:'155'},
-    {no:2,code:'sh601138',name:'工业富联',line:'AI算力',logic:'AI服务器龙头，订单饱满',target:'30',stop:'25'},
-    {no:3,code:'sh688981',name:'中芯国际',line:'半导体',logic:'国产替代核心，先进制程突破',target:'90',stop:'72'},
-    {no:4,code:'sz002371',name:'北方华创',line:'半导体',logic:'半导体设备龙头，业绩高增',target:'380',stop:'320'},
-    {no:5,code:'sz002594',name:'比亚迪',line:'新能源车',logic:'月销创新高+智驾落地',target:'320',stop:'260'},
-    {no:6,code:'sh600760',name:'中航沈飞',line:'军工',logic:'歼击机龙头，军费增长受益',target:'58',stop:'48'},
-    {no:7,code:'sz300750',name:'宁德时代',line:'新能源',logic:'电池全球龙头，海外订单爆发',target:'250',stop:'200'},
-    {no:8,code:'sh600519',name:'贵州茅台',line:'消费白马',logic:'业绩确定性强，外资回流标的',target:'1900',stop:'1680'},
-    {no:9,code:'sz000977',name:'浪潮信息',line:'AI算力',logic:'AI服务器+信创双轮驱动',target:'45',stop:'36'},
-    {no:10,code:'sh603501',name:'韦尔股份',line:'半导体',logic:'CIS芯片龙头，手机复苏受益',target:'110',stop:'88'},
+    {no:1,code:'sz300308',name:'中际旭创',line:'AI算力',logic:'光模块龙头，AI算力核心受益',turnover:'4.2%',capital:'+3.8亿',retail:'散户减持',risk:'低',trend:'多头排列',buyPoint:'回踩180支撑',target:'210',stop:'170'},
+    {no:2,code:'sh601138',name:'工业富联',line:'AI算力',logic:'AI服务器龙头，订单饱满',turnover:'2.5%',capital:'+2.1亿',retail:'散户平稳',risk:'低',trend:'多头排列',buyPoint:'站稳28加仓',target:'35',stop:'25'},
+    {no:3,code:'sh688981',name:'中芯国际',line:'半导体',logic:'国产替代核心，先进制程突破',turnover:'4.2%',capital:'+3.5亿',retail:'散户追高',risk:'中',trend:'突破20日线',buyPoint:'回踩75不破',target:'90',stop:'72'},
+    {no:4,code:'sz002371',name:'北方华创',line:'半导体',logic:'半导体设备龙头，业绩高增',turnover:'2.8%',capital:'+2.6亿',retail:'散户减持',risk:'低',trend:'多头排列',buyPoint:'340附近',target:'380',stop:'320'},
+    {no:5,code:'sz002594',name:'比亚迪',line:'新能源车',logic:'月销创新高+智驾落地',turnover:'3.8%',capital:'+2.3亿',retail:'散户追高',risk:'低',trend:'强势上涨',buyPoint:'回踩MA10(278)',target:'320',stop:'260'},
+    {no:6,code:'sh600760',name:'中航沈飞',line:'军工',logic:'歼击机龙头，军费增长受益',turnover:'3.1%',capital:'+1.8亿',retail:'散户平稳',risk:'低',trend:'震荡向上',buyPoint:'回踩50支撑',target:'58',stop:'48'},
+    {no:7,code:'sz300750',name:'宁德时代',line:'新能源',logic:'电池全球龙头，海外订单爆发',turnover:'2.1%',capital:'+1.8亿',retail:'散户减持',risk:'低',trend:'多头排列',buyPoint:'站稳220',target:'250',stop:'200'},
+    {no:8,code:'sh600519',name:'贵州茅台',line:'消费白马',logic:'业绩确定性强，外资回流标的',turnover:'0.5%',capital:'+4.1亿',retail:'散户少量买入',risk:'低',trend:'高位震荡',buyPoint:'回调至1700',target:'1900',stop:'1650'},
+    {no:9,code:'sz000977',name:'浪潮信息',line:'AI算力',logic:'AI服务器+信创双轮驱动',turnover:'5.2%',capital:'+1.5亿',retail:'散户追高',risk:'中',trend:'底部放量',buyPoint:'突破40确认',target:'48',stop:'36'},
+    {no:10,code:'sh603501',name:'韦尔股份',line:'半导体',logic:'CIS芯片龙头，手机复苏受益',turnover:'3.5%',capital:'+1.5亿',retail:'散户平稳',risk:'中',trend:'金叉确认',buyPoint:'站稳95',target:'110',stop:'88'},
   ];
+  const stocks2 = [
+    {no:11,code:'sz300059',name:'东方财富',line:'券商',logic:'互联网券商龙头，行情回暖受益',turnover:'6.5%',capital:'+0.8亿',retail:'散户追高',risk:'低',trend:'放量突破',buyPoint:'回踩17.5',target:'22',stop:'16'},
+    {no:12,code:'sh600893',name:'航发动力',line:'军工',logic:'航发核心企业，军机放量',turnover:'2.2%',capital:'+1.2亿',retail:'散户少量',risk:'低',trend:'震荡',buyPoint:'回踩MA20(42)',target:'52',stop:'40'},
+    {no:13,code:'sz002179',name:'中航光电',line:'军工',logic:'军用连接器龙头',turnover:'1.8%',capital:'+0.9亿',retail:'散户减持',risk:'低',trend:'多头排列',buyPoint:'回踩55',target:'65',stop:'52'},
+    {no:14,code:'sh601919',name:'中远海控',line:'航运',logic:'运价回升+分红预期',turnover:'3.2%',capital:'+1.6亿',retail:'散户追高',risk:'低',trend:'底部放量',buyPoint:'站稳14',target:'18',stop:'12.5'},
+    {no:15,code:'sz000858',name:'五粮液',line:'消费白马',logic:'白酒需求回暖+渠道改善',turnover:'0.8%',capital:'+1.2亿',retail:'散户少量',risk:'低',trend:'震荡筑底',buyPoint:'回调至135',target:'160',stop:'128'},
+    {no:16,code:'sh600276',name:'恒瑞医药',line:'医药',logic:'创新药龙头，出海加速',turnover:'2.5%',capital:'+1.4亿',retail:'散户平稳',risk:'低',trend:'上涨趋势',buyPoint:'回踩MA10(52)',target:'62',stop:'48'},
+    {no:17,code:'sz002475',name:'立讯精密',line:'消费电子',logic:'果链+汽车电子双驱动',turnover:'3.5%',capital:'-0.5亿',retail:'散户买入',risk:'中',trend:'⚠️下跌通道',buyPoint:'建议观望',target:'—',stop:'—'},
+    {no:18,code:'sh601012',name:'隆基绿能',line:'光伏',logic:'光伏龙头超跌',turnover:'5.1%',capital:'-0.5亿',retail:'散户抄底',risk:'高',trend:'⚠️下跌通道',buyPoint:'建议观望',target:'—',stop:'—'},
+    {no:19,code:'sh688111',name:'金山办公',line:'软件',logic:'办公软件+AI概念',turnover:'2.8%',capital:'-1.2亿',retail:'散户追高',risk:'高',trend:'⚠️高位回落',buyPoint:'不建议买入(PE过高)',target:'—',stop:'—'},
+    {no:20,code:'sz300760',name:'迈瑞医疗',line:'医疗器械',logic:'医械龙头',turnover:'1.2%',capital:'-0.8亿',retail:'散户少量',risk:'中',trend:'⚠️高位震荡',buyPoint:'建议观望等回调',target:'—',stop:'—'},
+  ];
+  const all = stocks.concat(stocks2);
   return `<div class="card">
-    <div class="card-title" style="color:#16c784">今日推荐10只主线股票</div>
-    <table class="data-table">
-      <tr><th>序号</th><th>代码</th><th>名称</th><th>主线</th><th>买入逻辑</th><th>目标价</th><th>止损</th><th>自选</th></tr>
-      ${stocks.map(s=>`<tr>
+    <div class="card-title" style="color:#16c784">今日推荐20只A股（详细分析版）</div>
+    <div style="overflow-x:auto">
+    <table class="data-table" style="font-size:12px">
+      <tr><th>序号</th><th>代码</th><th>名称</th><th>主线</th><th>买入理由</th><th>换手率</th><th>主力资金</th><th>散户</th><th>财务风险</th><th>趋势</th><th>建议买入点</th><th>目标价</th><th>止损</th></tr>
+      ${all.map(s=>{
+        const riskCls = s.risk==='高'?'down':s.risk==='中'?'flat':'up';
+        const trendWarn = s.trend.includes('⚠️');
+        const capCls = s.capital.startsWith('+')?'up':'down';
+        return `<tr${trendWarn?' style="background:#1c1014"':''}>
         <td>${s.no}</td><td>${s.code}</td><td><b>${s.name}</b></td><td>${s.line}</td>
-        <td style="font-size:11px">${s.logic}</td><td class="up">${s.target}</td><td class="down">${s.stop}</td>
-        <td><button class="btn btn-blue btn-sm" onclick="addToWatchlist('${s.code}','${s.name}','${s.target}','每日推荐')">+自选</button></td>
-      </tr>`).join('')}
+        <td style="font-size:11px">${s.logic}</td>
+        <td>${s.turnover}</td>
+        <td class="${capCls}">${s.capital}</td>
+        <td style="font-size:11px">${s.retail}</td>
+        <td class="${riskCls}">${s.risk}</td>
+        <td${trendWarn?' class="down"':''}>${s.trend}</td>
+        <td style="font-size:11px${s.buyPoint.includes('观望')||s.buyPoint.includes('不建议')?';color:#ea3943':''}">${s.buyPoint}</td>
+        <td class="up">${s.target}</td>
+        <td class="down">${s.stop}</td>
+      </tr>`}).join('')}
     </table>
+    </div>
+    <div class="tip-box" style="margin-top:12px;border-left-color:#ea3943">
+      <b>⚠️ 风险提示：</b>标红行为高风险股票（处于下跌通道或高估值），建议观望不买入。
+      本分析仅供参考学习，不构成投资建议，股市有风险入市需谨慎。
+    </div>
   </div>`;
 }
