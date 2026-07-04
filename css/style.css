@@ -156,6 +156,17 @@ body { font-family:'Microsoft YaHei','PingFang SC',sans-serif; background:#0d111
 .tag-negative { background:rgba(234,57,67,0.15); color:#ea3943; }
 .tag-neutral { background:rgba(139,148,158,0.15); color:#8b949e; }
 
+/* 交易信号 / 评级样式 */
+.rating-stars { color:#f0883e; font-size:14px; letter-spacing:1px; }
+.signal-safe { color:#16c784; }
+.signal-watch { color:#d29922; }
+.signal-warning { color:#f0883e; }
+.signal-danger { color:#ea3943; }
+.exit-alert-card { border:2px solid #ea3943; background:#1a0a0a; border-radius:8px; padding:12px; margin:8px 0; }
+.daily-report-card { border:1px solid #30363d; background:#161b22; border-radius:8px; padding:12px; margin:8px 0; }
+.buy-risk-item { padding:8px; margin:6px 0; background:#0d1117; border-left:3px solid #f0883e; border-radius:4px; font-size:12px; }
+.trading-rule { padding:10px; margin:6px 0; background:#0d1117; border-left:4px solid #58a6ff; border-radius:4px; }
+
 /* 响应式 */
 @media(max-width:768px) {
   .sidebar { width:60px; } .menu-item { padding:10px 8px; font-size:11px; text-align:center; }

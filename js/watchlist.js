@@ -9,15 +9,19 @@ function saveWatchlist(list) {
   localStorage.setItem(key, JSON.stringify(list));
 }
 
-// 添加自选股
+// 添加自选股（含目标价/止损价）
 function addToWatchlist(code, name, price, reason) {
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
+  const targetPrice = prompt(`设置 ${name} 的目标价（选填，直接确认跳过）：`,'') || '';
+  const stopLoss = prompt(`设置 ${name} 的止损价（选填，直接确认跳过）：`,'') || '';
   list.push({
     code, name, price,
     reason: reason || '',
     addDate: new Date().toISOString().slice(0, 10),
-    addPrice: price
+    addPrice: price,
+    targetPrice: targetPrice || '',
+    stopLoss: stopLoss || ''
   });
   saveWatchlist(list);
   alert(name + ' 已加入自选股');
@@ -31,8 +35,8 @@ function removeFromWatchlist(code) {
   renderWatchlist(document.getElementById('mainContent'));
 }
 
-// 渲染自选股页面
-function renderWatchlist(el) {
+// 渲染自选股页面（异步以获取大盘环境）
+async function renderWatchlist(el) {
   const list = getWatchlist();
   el.innerHTML = `
     <div class="card">
@@ -44,7 +48,11 @@ function renderWatchlist(el) {
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
         <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
       </div>
+      <div style="margin-top:8px;font-size:12px;color:#8b949e">
+        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
+      </div>
     </div>
+    <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据并生成每日体检报告...</p></div></div>
     ${renderCapitalAlerts(list)}
     ${renderOvervaluedAlerts(list)}
     <div class="card">
@@ -52,6 +60,17 @@ function renderWatchlist(el) {
       ${list.length ? renderWatchTableWithCapital(list) : '<p style="color:#8b949e">暂无自选股，可手动添加或从投资建议页导入</p>'}
     </div>
   `;
+  // 异步渲染每日体检
+  if (list.length && typeof getMarketContext === 'function') {
+    const marketCtx = await getMarketContext();
+    const dailyArea = document.getElementById('dailyReportArea');
+    if (dailyArea) {
+      dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
+    }
+  } else {
+    const dailyArea = document.getElementById('dailyReportArea');
+    if (dailyArea) dailyArea.innerHTML = '';
+  }
 }
 
 function renderWatchTable(list) {
@@ -80,27 +99,44 @@ function getRandCapital() {
 
 // 带主力资金的表格
 function renderWatchTableWithCapital(list) {
-  return `<table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>盈亏</th><th>今日主力</th><th>3日累计</th><th>5日累计</th><th>资金趋势</th><th>风险</th><th>操作</th></tr>
+  return `<div style="overflow-x:auto"><table class="data-table">
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>成本</th><th>盈亏</th><th>目标价</th><th>止损价</th><th>距止损</th><th>今日主力</th><th>5日累计</th><th>状态</th><th>操作</th></tr>
     ${list.map(s => {
       const cur = parseFloat(s.price) || 0;
       const add = parseFloat(s.addPrice) || cur;
+      const tp = parseFloat(s.targetPrice) || 0;
+      const sl = parseFloat(s.stopLoss) || 0;
       const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
       const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
       const cap = getCapitalData(s.code);
       const mainCls = cap.main.startsWith('+') ? 'up' : 'down';
-      const riskTag = cap.risk==='high' ? '<span class="factor-tag tag-negative">警告</span>' : cap.risk==='medium' ? '<span class="factor-tag tag-neutral">注意</span>' : '<span class="factor-tag tag-positive">安全</span>';
+      let stopDist = '—', stopCls = 'flat', statusTag = '<span class="factor-tag tag-positive">安全</span>';
+      if (sl > 0 && cur > 0) {
+        const dist = ((cur - sl) / sl * 100).toFixed(1);
+        stopDist = dist + '%';
+        stopCls = dist < 3 ? 'down' : dist < 8 ? 'flat' : 'up';
+        if (cur <= sl) statusTag = '<span class="factor-tag tag-negative">已破止损</span>';
+        else if (dist < 3) statusTag = '<span class="factor-tag tag-negative">危险</span>';
+        else if (dist < 8) statusTag = '<span class="factor-tag tag-neutral">警戒</span>';
+      } else if (cap.risk === 'high') statusTag = '<span class="factor-tag tag-negative">警告</span>';
+      else if (cap.risk === 'medium') statusTag = '<span class="factor-tag tag-neutral">注意</span>';
       return `<tr>
         <td>${s.code}</td><td><b>${s.name}</b></td><td>${s.price}</td>
+        <td>${s.addPrice || '—'}</td>
         <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
+        <td class="up">${tp || '—'}</td>
+        <td class="down">${sl || '—'}</td>
+        <td class="${stopCls}">${stopDist}</td>
         <td class="${mainCls}">${cap.main}</td>
-        <td class="${cap.days3.startsWith('+')?'up':'down'}">${cap.days3}</td>
         <td class="${cap.days5.startsWith('+')?'up':'down'}">${cap.days5}</td>
-        <td>${cap.trend}</td><td>${riskTag}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button></td>
+        <td>${statusTag}</td>
+        <td>
+          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button>
+        </td>
       </tr>`;
     }).join('')}
-  </table>`;
+  </table></div>`;
 }
 
 // 风险提醒（主力撤退警告）
@@ -209,14 +245,14 @@ function manualAddWatch() {
 // 一键导入推荐股票
 function addRecommendStocks() {
   const recommends = [
-    {code:'sh600519',name:'贵州茅台',price:'1756',reason:'白酒龙头，ROE>30%'},
-    {code:'sz300750',name:'宁德时代',price:'218.5',reason:'动力电池全球龙头'},
-    {code:'sz002594',name:'比亚迪',price:'285.6',reason:'新能源车龙头，智驾+出海'},
-    {code:'sh601012',name:'隆基绿能',price:'25.8',reason:'光伏龙头超跌反弹'},
-    {code:'sh688981',name:'中芯国际',price:'78.9',reason:'半导体国产替代核心'},
-    {code:'sz002371',name:'北方华创',price:'345',reason:'半导体设备龙头'},
-    {code:'sh603501',name:'韦尔股份',price:'98.5',reason:'CIS芯片龙头'},
-    {code:'sz000333',name:'美的集团',price:'68.3',reason:'家电白马，稳定分红'},
+    {code:'sh600519',name:'贵州茅台',price:'1756',reason:'白酒龙头，ROE>30%',targetPrice:'1900',stopLoss:'1650'},
+    {code:'sz300750',name:'宁德时代',price:'218.5',reason:'动力电池全球龙头',targetPrice:'250',stopLoss:'200'},
+    {code:'sz002594',name:'比亚迪',price:'285.6',reason:'新能源车龙头，智驾+出海',targetPrice:'320',stopLoss:'260'},
+    {code:'sh601012',name:'隆基绿能',price:'25.8',reason:'光伏龙头超跌反弹',targetPrice:'32',stopLoss:'22'},
+    {code:'sh688981',name:'中芯国际',price:'78.9',reason:'半导体国产替代核心',targetPrice:'90',stopLoss:'72'},
+    {code:'sz002371',name:'北方华创',price:'345',reason:'半导体设备龙头',targetPrice:'380',stopLoss:'320'},
+    {code:'sh603501',name:'韦尔股份',price:'98.5',reason:'CIS芯片龙头',targetPrice:'110',stopLoss:'88'},
+    {code:'sz000333',name:'美的集团',price:'68.3',reason:'家电白马，稳定分红',targetPrice:'78',stopLoss:'62'},
   ];
   const list = getWatchlist();
   let added = 0;
@@ -227,6 +263,88 @@ function addRecommendStocks() {
     }
   });
   saveWatchlist(list);
-  alert(`已导入 ${added} 只推荐股票（跳过已存在的）`);
+  alert(`已导入 ${added} 只推荐股票（含目标价和止损价）`);
   renderWatchlist(document.getElementById('mainContent'));
+}
+
+// 编辑自选股目标价/止损价
+function editWatchStock(code) {
+  const list = getWatchlist();
+  const stock = list.find(s => s.code === code);
+  if (!stock) return;
+  const tp = prompt(`编辑 ${stock.name} 的目标价：`, stock.targetPrice || '');
+  const sl = prompt(`编辑 ${stock.name} 的止损价：`, stock.stopLoss || '');
+  if (tp !== null) stock.targetPrice = tp;
+  if (sl !== null) stock.stopLoss = sl;
+  saveWatchlist(list);
+  renderWatchlist(document.getElementById('mainContent'));
+}
+
+// 每日体检报告
+function renderDailyReport(list, marketCtx) {
+  const evaluations = list.map(s => ({ stock: s, ev: evaluateWatchStock(s, marketCtx) }));
+  return `<div class="card">
+    <div class="card-title">📊 每日体检报告</div>
+    <div style="padding:8px 12px;background:#0d1117;border-radius:6px;margin-bottom:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      <span style="color:${marketCtx.color};font-weight:700">大盘环境：${marketCtx.desc}</span>
+      <span style="font-size:12px;color:#8b949e">上证${marketCtx.shPct>0?'+':''}${marketCtx.shPct}% | 创业板${marketCtx.cybPct>0?'+':''}${marketCtx.cybPct}%</span>
+    </div>
+    <div style="overflow-x:auto"><table class="data-table">
+      <tr><th>股票</th><th>信号</th><th>卖出分</th><th>买入分</th><th>换手率</th><th>资金</th><th>交易建议</th></tr>
+      ${evaluations.map(({stock:s, ev}) => {
+        const sigMap = {sell:'🔴 清仓',reduce:'🟠 减仓',hold:'🟡 持有',buy:'🟢 买入'};
+        const sigCls = {sell:'down',reduce:'down',hold:'flat',buy:'up'};
+        return `<tr>
+          <td><b>${s.name}</b></td>
+          <td class="${sigCls[ev.signal]||'flat'}">${sigMap[ev.signal]||'持有'}</td>
+          <td class="down">${ev.sellScore}</td><td class="up">${ev.buyScore}</td>
+          <td>${ev.turnover}%</td>
+          <td class="${ev.capital.main.startsWith('+')?'up':'down'}">${ev.capital.main}</td>
+          <td style="font-size:12px">${ev.tradeAction}</td>
+        </tr>`;
+      }).join('')}
+    </table></div>
+    <div style="margin-top:10px;font-size:11px;color:#8b949e">
+      评分说明：卖出分≥80清仓 | ≥40减仓 | 买入分≥70可加仓 | 每日开盘前查看
+    </div>
+  </div>`;
+}
+
+// 退出预警（只显示需要卖出/减仓的股票）
+function renderExitAlerts(list, marketCtx) {
+  const alerts = [];
+  list.forEach(s => {
+    const ev = evaluateWatchStock(s, marketCtx);
+    if (ev.signal === 'sell' || ev.signal === 'reduce') {
+      const risk = predictRisk(s, ev);
+      alerts.push({ stock: s, evaluation: ev, risk });
+    }
+  });
+  if (!alerts.length) return '';
+  return `<div class="card" style="border:2px solid #ea3943;background:#1a0a0a">
+    <div class="card-title" style="color:#ea3943;font-size:18px">🚨 退出预警 — 请立即处理</div>
+    ${alerts.map(a => {
+      const bgColor = a.evaluation.signal==='sell' ? '#2d0a0a' : '#2d1f0a';
+      const labelColor = a.evaluation.signal==='sell' ? '#ea3943' : '#f0883e';
+      const label = a.evaluation.signal==='sell' ? '立即清仓' : '减仓观察';
+      return `<div style="padding:12px;margin:8px 0;background:${bgColor};border-radius:8px;border-left:4px solid ${labelColor}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="background:${labelColor};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:700">${label}</span>
+            <b style="margin-left:8px;font-size:15px">${a.stock.name}</b>
+            <span style="color:#8b949e;font-size:12px;margin-left:6px">${a.stock.code}</span>
+          </div>
+          <span style="color:${labelColor};font-weight:700">${a.evaluation.tradeAction}</span>
+        </div>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+          ${a.evaluation.reasons.filter(r=>r.type==='sell'||r.type==='reduce').map(r=>`<span style="font-size:12px;color:#f8d7da;background:#3d0f0f;padding:3px 8px;border-radius:4px">${r.text}</span>`).join('')}
+        </div>
+        ${a.risk.factors.length?`<div style="margin-top:6px;font-size:11px;color:#ea3943">暴雷风险因子：${a.risk.factors.join(' + ')} → 综合风险：${a.risk.level}</div>`:''}
+        <div style="margin-top:6px">
+          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${a.stock.code}')">清除持仓</button>
+          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${a.stock.code}')">修改止损</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
 }

@@ -8,7 +8,10 @@ function renderRecommend(el) {
         股市有风险，入市需谨慎。请根据自身风险承受能力做出决策。
       </div>
     </div>
+    ${renderBuyRatingLegend()}
     ${renderStrongBuy()}
+    ${renderBuyRiskChecklist()}
+    ${renderExitStrategy()}
     ${renderSectorPicks()}
     ${renderUSStockPicks()}
     ${renderAvoidList()}
@@ -16,36 +19,81 @@ function renderRecommend(el) {
   `;
 }
 
+// 买入评级体系说明
+function renderBuyRatingLegend() {
+  return `<div class="card">
+    <div class="card-title">📊 买入评级体系</div>
+    <div class="factor-grid">
+      <div class="factor-card" style="border-left:3px solid #16c784">
+        <h4>★★★★★ 强烈推荐</h4>
+        <p>基本面优秀+技术面突破+主力加仓+估值合理+政策利好，五维共振。预期收益>20%</p>
+      </div>
+      <div class="factor-card" style="border-left:3px solid #3fb950">
+        <h4>★★★★ 推荐买入</h4>
+        <p>基本面良好+技术面向好+资金面积极，至少三维共振。预期收益15-20%</p>
+      </div>
+      <div class="factor-card" style="border-left:3px solid #d29922">
+        <h4>★★★ 观望等待</h4>
+        <p>基本面尚可但技术面不明朗或估值偏高，等待更好买点。暂不操作</p>
+      </div>
+      <div class="factor-card" style="border-left:3px solid #ea3943">
+        <h4>★★ 不建议 / ★ 回避</h4>
+        <p>高估值/趋势走坏/主力撤退，风险大于收益，坚决不碰</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderStrongBuy() {
   const picks = [
-    {code:'sh600519',name:'贵州茅台',price:'1756',target:'1900-2000',
+    {code:'sh600519',name:'贵州茅台',price:'1756',target:'1900-2000',stop:'1650',
      reason:'白酒龙头，ROE>30%，业绩稳定增长，外资持续加仓',
-     rating:'强烈推荐',strategy:'回调至1700附近分批建仓，止损1650'},
-    {code:'sz300750',name:'宁德时代',price:'218',target:'250-280',
+     stars:5,rating:'强烈推荐',riskLevel:'低',hold:'3-6个月',
+     risks:'消费降级预期、政策调控、批价波动',
+     strategy:'回调至1700附近分批建仓，止损1650'},
+    {code:'sz300750',name:'宁德时代',price:'218',target:'250-280',stop:'200',
      reason:'动力电池全球龙头，产能扩张+海外订单爆发',
-     rating:'强烈推荐',strategy:'站稳220可买入，止损200'},
-    {code:'sz002594',name:'比亚迪',price:'285',target:'320-350',
+     stars:5,rating:'强烈推荐',riskLevel:'中',hold:'3-6个月',
+     risks:'新能源车增速放缓、锂价波动、海外反倾销',
+     strategy:'站稳220可买入，止损200'},
+    {code:'sz002594',name:'比亚迪',price:'285',target:'320-350',stop:'260',
      reason:'新能源车销量持续创新高，智能驾驶+出海双轮驱动',
-     rating:'推荐买入',strategy:'回踩5日线加仓，止损260'},
-    {code:'sh601012',name:'隆基绿能',price:'25.8',target:'30-35',
+     stars:4,rating:'推荐买入',riskLevel:'中',hold:'2-4个月',
+     risks:'价格战持续、毛利率压力、竞争加剧',
+     strategy:'回踩5日线加仓，止损260'},
+    {code:'sh601012',name:'隆基绿能',price:'25.8',target:'30-35',stop:'23',
      reason:'光伏龙头超跌反弹，PE历史低位，BC电池技术领先',
-     rating:'推荐买入',strategy:'底部放量突破，目标30，止损23'},
-    {code:'sh688981',name:'中芯国际',price:'78.9',target:'90-100',
+     stars:4,rating:'推荐买入',riskLevel:'中高',hold:'2-3个月',
+     risks:'光伏价格战、组件产能过剩、海外贸易壁垒',
+     strategy:'底部放量突破，目标30，止损23'},
+    {code:'sh688981',name:'中芯国际',price:'78.9',target:'90-100',stop:'72',
      reason:'半导体国产替代核心标的，先进制程持续突破',
-     rating:'推荐买入',strategy:'站上年线确认趋势，逢低布局'},
+     stars:4,rating:'推荐买入',riskLevel:'中',hold:'3-6个月',
+     risks:'美国制裁升级、先进设备受限、周期波动',
+     strategy:'站上年线确认趋势，逢低布局'},
   ];
   return `<div class="card">
-    <div class="card-title" style="color:#16c784">A股重点推荐</div>
-    <table class="data-table">
-      <tr><th>代码</th><th>名称</th><th>现价</th><th>目标价</th><th>评级</th><th>理由</th><th>操作策略</th><th>自选</th></tr>
-      ${picks.map(p=>`<tr>
-        <td>${p.code}</td><td><b>${p.name}</b></td><td>${p.price}</td>
-        <td class="up">${p.target}</td><td class="up">${p.rating}</td>
-        <td style="font-size:11px">${p.reason}</td>
-        <td style="font-size:11px">${p.strategy}</td>
-        <td><button class="btn btn-blue btn-sm" onclick="addToWatchlist('${p.code}','${p.name}','${p.price}','${p.rating}')">+自选</button></td>
-      </tr>`).join('')}
-    </table>
+    <div class="card-title" style="color:#16c784">A股重点推荐（含买入评级）</div>
+    <div style="overflow-x:auto"><table class="data-table">
+      <tr><th>代码</th><th>名称</th><th>现价</th><th>目标</th><th>止损</th><th>评级</th><th>风险</th><th>周期</th><th>核心逻辑</th><th>操作</th><th>自选</th></tr>
+      ${picks.map(p=>{
+        const stars = '★'.repeat(p.stars) + '☆'.repeat(5-p.stars);
+        const rClass = p.riskLevel==='低'?'up':p.riskLevel==='中'?'flat':'down';
+        return `<tr>
+          <td>${p.code}</td><td><b>${p.name}</b></td><td>${p.price}</td>
+          <td class="up">${p.target}</td><td class="down">${p.stop}</td>
+          <td style="color:#f0883e;font-size:13px">${stars}<br><span style="font-size:10px">${p.rating}</span></td>
+          <td class="${rClass}">${p.riskLevel}</td>
+          <td style="font-size:11px">${p.hold}</td>
+          <td style="font-size:11px">${p.reason}</td>
+          <td style="font-size:11px">${p.strategy}</td>
+          <td><button class="btn btn-blue btn-sm" onclick="addToWatchlist('${p.code}','${p.name}','${p.price}','${p.rating}')">+自选</button></td>
+        </tr>`;
+      }).join('')}
+    </table></div>
+    <div class="tip-box" style="margin-top:10px">
+      <b>提示：</b>五星股票为当前市场首选配置，但仍需结合大盘环境。建议使用自选股页的"每日体检"功能持续监控。
+    </div>
   </div>`;
 }
 
@@ -262,6 +310,69 @@ function renderValuationRules() {
       高估值股票即使短期还能涨，风险收益比极差。
       当PE>行业均值50%、距高点跌幅>20%仍无止跌迹象时，
       坚决不买！等待估值回归合理区间再考虑。
+    </div>
+  </div>`;
+}
+
+// 买入前风险清单
+function renderBuyRiskChecklist() {
+  const checks = [
+    {dim:'估值维度',items:['PE是否超行业均值30%？','PB>10倍（非科技）？','距52周高点<10%？'],color:'#ea3943'},
+    {dim:'资金维度',items:['主力5日累计流出？','北向资金连续减持？','大股东近期减持公告？'],color:'#f0883e'},
+    {dim:'技术维度',items:['跌破20日均线？','MACD死叉？','成交量异常放大但价格不涨？'],color:'#d29922'},
+    {dim:'政策/行业',items:['是否面临行业政策利空？','上下游是否出现不利变化？','是否有诉讼/违规风险？'],color:'#58a6ff'},
+  ];
+  return `<div class="card">
+    <div class="card-title">✅ 买入前风险清单（每只股票买前必查）</div>
+    <div class="factor-grid">
+      ${checks.map(c=>`<div class="factor-card" style="border-top:3px solid ${c.color}">
+        <h4 style="color:${c.color}">${c.dim}</h4>
+        ${c.items.map(i=>`<p style="font-size:12px">☐ ${i}</p>`).join('')}
+      </div>`).join('')}
+    </div>
+    <div class="tip-box" style="margin-top:10px">
+      <b>使用方法：</b>买入前逐项检查，若任一维度有2项以上命中，建议暂缓买入或降低仓位。
+    </div>
+  </div>`;
+}
+
+// 卖出决策树
+function renderExitStrategy() {
+  return `<div class="card">
+    <div class="card-title" style="color:#ea3943">📤 已购股票卖出决策树</div>
+    <div class="factor-grid">
+      <div class="factor-card" style="border-left:4px solid #ea3943">
+        <h4>🚨 立即清仓</h4>
+        <p>• 跌破止损位（绝对纪律）<br>
+        • 亏损≥8% 且无反弹迹象<br>
+        • 重大利空（财务造假/被ST）<br>
+        • 主力5日连续大额流出</p>
+      </div>
+      <div class="factor-card" style="border-left:4px solid #f0883e">
+        <h4>⚠️ 分批减仓</h4>
+        <p>• 达到目标价（先出50%）<br>
+        • 盈利>20% 且量能萎缩<br>
+        • PE超行业均值50%以上<br>
+        • 大盘转弱 + 个股补跌</p>
+      </div>
+      <div class="factor-card" style="border-left:4px solid #d29922">
+        <h4>🔍 观察持有</h4>
+        <p>• 小幅回调但均线支撑有效<br>
+        • 主力资金仍在流入<br>
+        • 基本面逻辑未变<br>
+        • 设好止损价，达标再行动</p>
+      </div>
+      <div class="factor-card" style="border-left:4px solid #16c784">
+        <h4>💎 继续持有</h4>
+        <p>• 趋势完好，均线多头排列<br>
+        • 主力加仓，成交活跃<br>
+        • 未达目标价且风险可控<br>
+        • 所在板块仍有催化预期</p>
+      </div>
+    </div>
+    <div class="tip-box" style="border-left-color:#ea3943;margin-top:10px">
+      <b>卖出铁律：</b>止损无条件执行。到了止损位就卖，不抱幻想。
+      "再等等看"是散户亏损的第一原因。
     </div>
   </div>`;
 }

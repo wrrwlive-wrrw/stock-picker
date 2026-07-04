@@ -77,14 +77,18 @@ async function generateDailyAnalysis() {
   result.innerHTML = '<div class="card"><p style="color:#58a6ff">正在调用AI分析引擎...</p></div>';
 
   const today = new Date().toLocaleDateString('zh-CN');
-  const prompt = buildDailyPrompt(today);
+  // 先拉取真实大盘数据注入 Prompt
+  status.textContent = '拉取实时大盘数据中...';
+  const marketSnapshot = await fetchMarketSnapshot();
+  status.textContent = 'AI分析中，请稍候（含真实大盘数据）...';
+  const prompt = buildDailyPrompt(today, marketSnapshot);
 
   try {
     const res = await fetch(AI_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
-        model: AI_MODEL, temperature: 0.7, max_tokens: 4000,
+        model: AI_MODEL, temperature: 0.5, max_tokens: 6000,
         messages: [
           { role: 'system', content: getSystemPrompt() },
           { role: 'user', content: prompt }
@@ -119,49 +123,62 @@ async function generateDailyAnalysis() {
 }
 
 function getSystemPrompt() {
-  return `你是一位资深A股投资分析师，拥有20年实战经验。你的分析风格：
-1. 简洁直接，不废话
-2. 必须给出具体股票代码和名称
-3. 结合国际局势、美股走势、政策面综合分析
-4. 每次必须推荐恰好20只股票
-5. 对每只股票必须分析：换手率、主力资金动向、散户买入情况、财务风险、是否处于下跌通道、建议买入时点
-6. 用markdown格式输出，使用##标题分段
-7. 免责声明：提醒用户这是AI分析仅供参考，不构成投资建议`;
+  return `你是资深A股投研总监，融合东方财富、同花顺、英为财情三家平台的分析框架。你的风格：
+1. 简洁直接，量化数据先行，不讲空话
+2. 必须结合传入的真实大盘数据（上证/深证/创业板实时点位）做研判
+3. 分析框架：宏观→大盘技术面→资金面（北向/融资）→板块联动→个股
+4. 板块联动逻辑：美股AI→A股算力/半导体；油价→石化/军工；汇率→出口链；地产→银行/建材
+5. 每次推荐恰好20只股票，必须给出：五星评级、买入理由(3条)、风险点(3条)、买入区间、目标价、止损价、持有周期
+6. 使用markdown格式，##标题分段，表格数据整齐
+7. 结尾必须给出"今日3条交易铁律"
+8. 免责声明：AI分析仅供参考，不构成投资建议`;
 }
 
-function buildDailyPrompt(today) {
-  return `今天是${today}，请为我做一份完整的每日投资分析报告，包含：
+// 拉取实时大盘快照供 Prompt 使用
+async function fetchMarketSnapshot() {
+  try {
+    if (typeof fetchIndexData !== 'function') return null;
+    const data = await fetchIndexData();
+    const sh = data.sh000001 || {}, sz = data.sz399001 || {}, cyb = data.sz399006 || {};
+    return {
+      sh: { name:'上证指数', price:sh.price||'—', pct:sh.pct||'0', vol:sh.volume||'—' },
+      sz: { name:'深证成指', price:sz.price||'—', pct:sz.pct||'0', vol:sz.volume||'—' },
+      cyb:{ name:'创业板指', price:cyb.price||'—', pct:cyb.pct||'0', vol:cyb.volume||'—' }
+    };
+  } catch(e) { return null; }
+}
 
-## 一、今日大盘研判
-分析A股（上证/深证/创业板）当前走势、支撑位压力位、短期方向判断
+function buildDailyPrompt(today, snapshot) {
+  const mkt = snapshot ? `\n## 实时大盘快照（作为分析基础）\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
+  return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份专业级投资分析报告：${mkt}
+## 一、大盘技术面研判
+- 上证/深证/创业板 日K位置、量能、MACD、均线多空
+- 关键支撑压力位（写清具体点位）
+- 北向资金今日预估流向
 
-## 二、国际局势对A股影响
-分析当前国际热点（美伊冲突、俄乌局势、中美关系、美联储政策等）对A股各板块的具体影响
+## 二、国际市场传导
+- 昨夜美股（道琼斯/纳指/标普）+欧洲主要指数走势
+- 大宗商品（油/金/铜/美元指数）对A股板块的映射
+- 地缘政治（中美/俄乌/中东）对军工、能源、供应链的具体影响
 
-## 三、隔夜美股分析
-昨夜美股（道琼斯/纳斯达克/标普）走势对今日A股的传导影响，哪些板块受益/承压
+## 三、板块联动分析
+明确指出3-5条最强主线板块，写明：主线逻辑 + 催化事件 + 核心龙头 + 跟涨标的
 
-## 四、今日主线方向
-明确给出2-3条今日最强主线方向和逻辑
-
-## 五、今日推荐20只股票（详细分析版）
-以表格形式列出，必须包含以下所有字段：
-| 序号 | 代码 | 名称 | 主线 | 买入理由 | 换手率 | 主力资金 | 散户情况 | 财务风险 | 趋势判断 | 建议买入点 | 目标价 | 止损价 |
-
-字段说明：
-- 换手率：预估当日换手率(%)，判断活跃度
-- 主力资金：主力今日净流入/流出(亿)，判断机构态度
-- 散户情况：散户是否在追高或撤退
-- 财务风险：低/中/高（结合PE、商誉、负债率）
-- 趋势判断：多头/空头/震荡，是否处于下跌通道
-- 建议买入点：具体的价位或时机（如"回踩MA20"、"跌破XX止损"）
+## 四、今日推荐20只股票（专业评级版）
+以表格列出，必须包含全部字段：
+| 序号 | 代码 | 名称 | 主线 | 五星评级 | 买入理由(3条) | 风险点(3条) | 换手率 | 主力资金 | 财务风险 | 趋势 | 买入区间 | 目标价 | 止损价 | 持有周期 |
 
 要求：
-- 恰好20只股票，覆盖不同主线（AI、半导体、新能源、消费、军工、医药等）
-- 必须有明确的股票代码（如sh600519、sz300750）
-- 财务有风险或处于下跌通道的股票要明确标注"建议观望"
-- 高估值(PE>行业均值50%)的股票要提示风险
-- 结尾添加免责声明：本分析由AI生成，仅供参考，不构成投资建议，股市有风险入市需谨慎`;
+- 恰好20只A股，代码规范（如sh600519）
+- 五星评级：★★★★★强烈推荐/★★★★推荐/★★★观望/★★不建议/★回避
+- 高估值(PE>行业均值50%)、下跌通道、主力撤退的股票明确标注"回避"或"观望"
+- 每只必须写清风险点，让用户理性决策
+
+## 五、今日3条交易铁律
+针对当前大盘环境，给出3条今日必须遵守的交易纪律
+
+## 六、免责声明
+本分析由AI生成，仅供参考，不构成投资建议，股市有风险入市需谨慎`;
 }
 
 // 将AI的markdown输出转为HTML
