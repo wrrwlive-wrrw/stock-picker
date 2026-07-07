@@ -12,25 +12,32 @@ function getWatchlist() {
 
 function saveWatchlist(list) {
   const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
-  localStorage.setItem(key, JSON.stringify(list));
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+    return true;
+  } catch(e) {
+    console.error('saveWatchlist failed:', e);
+    alert('保存失败：浏览器存储空间不足或处于隐私模式');
+    return false;
+  }
 }
 
-// 添加自选股（含目标价/止损价）
+// 添加自选股（不再弹出prompt，直接添加）
 function addToWatchlist(code, name, price, reason) {
+  if (!currentUser) { alert('请先登录'); return; }
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
-  const targetPrice = prompt(`设置 ${name} 的目标价（选填，直接确认跳过）：`,'') || '';
-  const stopLoss = prompt(`设置 ${name} 的止损价（选填，直接确认跳过）：`,'') || '';
   list.push({
-    code, name, price,
+    code, name, price: price || '—',
     reason: reason || '',
     addDate: new Date().toISOString().slice(0, 10),
-    addPrice: price,
-    targetPrice: targetPrice || '',
-    stopLoss: stopLoss || ''
+    addPrice: price || '—',
+    targetPrice: '',
+    stopLoss: ''
   });
-  saveWatchlist(list);
-  alert(name + ' 已加入自选股');
+  if (saveWatchlist(list)) {
+    alert(name + ' 已加入自选股');
+  }
 }
 
 // 移除自选股
@@ -47,6 +54,18 @@ function renderWatchlist(el) {
   let list = getWatchlist();
   if (!Array.isArray(list)) list = [];
   list = list.filter(s => s && s.code && s.name);
+
+  // 如果当前用户无数据，检查是否存在guest数据（修复key不匹配问题）
+  if (!list.length && currentUser) {
+    try {
+      const guestData = JSON.parse(localStorage.getItem('stock_watchlist_guest') || '[]');
+      if (guestData.length) {
+        list = guestData.filter(s => s && s.code && s.name);
+        // 迁移到当前用户名下
+        if (list.length) saveWatchlist(list);
+      }
+    } catch(e) {}
+  }
 
   // 调试信息
   const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
@@ -269,16 +288,29 @@ function renderOvervaluedAlerts(list) {
 }
 
 function manualAddWatch() {
+  if (!currentUser) { alert('请先登录'); return; }
   const code = document.getElementById('watchAddCode').value.trim();
   const name = document.getElementById('watchAddName').value.trim();
   const price = document.getElementById('watchAddPrice').value.trim();
   if (!code || !name) { alert('请输入代码和名称'); return; }
-  addToWatchlist(code, name, price || '—', '手动添加');
+  const list = getWatchlist();
+  if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
+  list.push({
+    code, name, price: price || '—',
+    reason: '手动添加',
+    addDate: new Date().toISOString().slice(0, 10),
+    addPrice: price || '—',
+    targetPrice: '', stopLoss: ''
+  });
+  if (saveWatchlist(list)) {
+    alert(name + ' 已加入自选股');
+  }
   renderWatchlist(document.getElementById('mainContent'));
 }
 
 // 一键导入推荐股票
 function addRecommendStocks() {
+  if (!currentUser) { alert('请先登录'); return; }
   const recommends = [
     {code:'sh600519',name:'贵州茅台',price:'1756',reason:'白酒龙头，ROE>30%',targetPrice:'1900',stopLoss:'1650'},
     {code:'sz300750',name:'宁德时代',price:'218.5',reason:'动力电池全球龙头',targetPrice:'250',stopLoss:'200'},
@@ -297,8 +329,9 @@ function addRecommendStocks() {
       added++;
     }
   });
-  saveWatchlist(list);
-  alert(`已导入 ${added} 只推荐股票（含目标价和止损价）`);
+  if (saveWatchlist(list)) {
+    alert(`已导入 ${added} 只推荐股票（含目标价和止损价）`);
+  }
   renderWatchlist(document.getElementById('mainContent'));
 }
 
