@@ -89,6 +89,7 @@ async function generateDailyAnalysis() {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
         model: AI_MODEL, temperature: 0.5, max_tokens: 6000,
+        enable_thinking: false,
         messages: [
           { role: 'system', content: getSystemPrompt() },
           { role: 'user', content: prompt }
@@ -105,10 +106,13 @@ async function generateDailyAnalysis() {
     }
     const data = await res.json();
     let text = data.choices?.[0]?.message?.content || '';
-    // 清理思考标签
-    if (text.includes('<think>')) text = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
-    if (text.includes('</think>')) text = text.split('</think>').pop().trim();
-    text = text.replace(/^[\s\n]*/, '');
+    // 清理思考标签和特殊token
+    text = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+    text = text.replace(/<think>[\s\S]*/g, '');
+    if (text.includes('</think>')) text = text.split('</think>').pop();
+    text = text.replace(/<\/?think>/g, '');
+    text = text.replace(/<\|.*?\|>/g, '');
+    text = text.replace(/^[\s\n]*/, '').trim();
     if (!text) throw new Error('AI返回内容为空');
     const html = formatAIResult(text);
     result.innerHTML = html;
@@ -188,9 +192,13 @@ function buildDailyPrompt(today, snapshot) {
 // 将AI的markdown输出转为HTML
 function formatAIResult(text) {
   // 清理AI思考标签（兼容DeepSeek/Qwen等CoT模型）
-  if (text.includes('<think>')) text = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
-  if (text.includes('</think>')) text = text.split('</think>').pop().trim();
-  text = text.replace(/^[\s\n]*/, '');
+  text = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  text = text.replace(/<think>[\s\S]*/g, '');
+  if (text.includes('</think>')) text = text.split('</think>').pop();
+  // 清理其他可能的特殊标签
+  text = text.replace(/<\/?think>/g, '');
+  text = text.replace(/<\|.*?\|>/g, '');
+  text = text.replace(/^[\s\n]*/, '').trim();
   if (!text || text.length < 20) return '<div class="card"><p style="color:#ea3943">AI返回内容异常，请重试</p></div>';
 
   let html = text
