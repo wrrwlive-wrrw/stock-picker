@@ -1,6 +1,6 @@
 // 每日AI智能分析模块
 const AI_API_URL = 'https://api.siliconflow.cn/v1/chat/completions';
-const AI_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
+const AI_MODEL = 'Qwen/Qwen3-8B';
 
 function getAIKey() {
   return localStorage.getItem('ai_api_key') || '';
@@ -104,7 +104,11 @@ async function generateDailyAnalysis() {
       throw new Error(errMsg + ' — ' + errText.slice(0,120));
     }
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content;
+    let text = data.choices?.[0]?.message?.content || '';
+    // 清理思考标签
+    if (text.includes('<think>')) text = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+    if (text.includes('</think>')) text = text.split('</think>').pop().trim();
+    text = text.replace(/^[\s\n]*/, '');
     if (!text) throw new Error('AI返回内容为空');
     const html = formatAIResult(text);
     result.innerHTML = html;
@@ -183,6 +187,12 @@ function buildDailyPrompt(today, snapshot) {
 
 // 将AI的markdown输出转为HTML
 function formatAIResult(text) {
+  // 清理AI思考标签（兼容DeepSeek/Qwen等CoT模型）
+  if (text.includes('<think>')) text = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+  if (text.includes('</think>')) text = text.split('</think>').pop().trim();
+  text = text.replace(/^[\s\n]*/, '');
+  if (!text || text.length < 20) return '<div class="card"><p style="color:#ea3943">AI返回内容异常，请重试</p></div>';
+
   let html = text
     .replace(/## (.*)/g, '<div class="card"><div class="card-title">$1</div>')
     .replace(/\| *序号[^|]*\| *代码[^\n]*/g,
