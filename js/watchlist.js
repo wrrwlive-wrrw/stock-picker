@@ -1,7 +1,13 @@
 // 自选股模块
 function getWatchlist() {
   const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
-  return JSON.parse(localStorage.getItem(key) || '[]');
+  try {
+    const data = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(data) ? data : [];
+  } catch(e) {
+    console.error('getWatchlist parse error:', e);
+    return [];
+  }
 }
 
 function saveWatchlist(list) {
@@ -37,39 +43,62 @@ function removeFromWatchlist(code) {
 
 // 渲染自选股页面（异步以获取大盘环境）
 async function renderWatchlist(el) {
-  const list = getWatchlist();
-  el.innerHTML = `
-    <div class="card">
-      <div class="card-title">我的自选股</div>
-      <div class="toolbar">
-        <input type="text" id="watchAddCode" placeholder="股票代码 如sh600519" style="width:160px">
+  let list = getWatchlist();
+  // 确保list是有效数组，过滤无效项
+  if (!Array.isArray(list)) list = [];
+  list = list.filter(s => s && s.code && s.name);
+  try {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-title">我的自选股（${list.length}只）</div>
+        <div class="toolbar">
+          <input type="text" id="watchAddCode" placeholder="股票代码 如sh600519" style="width:160px">
+          <input type="text" id="watchAddName" placeholder="名称" style="width:100px">
+          <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
+          <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
+          <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:#8b949e">
+          💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
+        </div>
+      </div>
+      <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据并生成每日体检报告...</p></div></div>
+      ${renderCapitalAlerts(list)}
+      ${renderOvervaluedAlerts(list)}
+      <div class="card">
+        <div class="card-title">持仓明细 & 主力资金动向</div>
+        ${list.length ? renderWatchTableWithCapital(list) : '<p style="color:#8b949e">暂无自选股，可手动添加或从投资建议页导入</p>'}
+      </div>
+    `;
+  } catch(e) {
+    console.error('renderWatchlist error:', e);
+    el.innerHTML = `<div class="card"><div class="card-title">我的自选股</div>
+      <p style="color:#ea3943">渲染出错：${e.message}</p>
+      <p style="color:#8b949e;font-size:12px">自选股数据：${list.length}条记录</p>
+      <div class="toolbar" style="margin-top:12px">
+        <input type="text" id="watchAddCode" placeholder="股票代码" style="width:160px">
         <input type="text" id="watchAddName" placeholder="名称" style="width:100px">
         <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
-        <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
-      </div>
-      <div style="margin-top:8px;font-size:12px;color:#8b949e">
-        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
-      </div>
-    </div>
-    <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据并生成每日体检报告...</p></div></div>
-    ${renderCapitalAlerts(list)}
-    ${renderOvervaluedAlerts(list)}
-    <div class="card">
-      <div class="card-title">持仓明细 & 主力资金动向</div>
-      ${list.length ? renderWatchTableWithCapital(list) : '<p style="color:#8b949e">暂无自选股，可手动添加或从投资建议页导入</p>'}
-    </div>
-  `;
+      </div></div>`;
+    return;
+  }
   // 异步渲染每日体检
-  if (list.length && typeof getMarketContext === 'function') {
-    const marketCtx = await getMarketContext();
-    const dailyArea = document.getElementById('dailyReportArea');
-    if (dailyArea) {
-      dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
+  try {
+    if (list.length && typeof getMarketContext === 'function') {
+      const marketCtx = await getMarketContext();
+      const dailyArea = document.getElementById('dailyReportArea');
+      if (dailyArea) {
+        dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
+      }
+    } else {
+      const dailyArea = document.getElementById('dailyReportArea');
+      if (dailyArea) dailyArea.innerHTML = '';
     }
-  } else {
+  } catch(e) {
+    console.error('dailyReport error:', e);
     const dailyArea = document.getElementById('dailyReportArea');
-    if (dailyArea) dailyArea.innerHTML = '';
+    if (dailyArea) dailyArea.innerHTML = `<div class="card"><p style="color:#d29922">每日体检加载失败：${e.message}</p></div>`;
   }
 }
 
@@ -94,7 +123,8 @@ function getCapitalData(code) {
 
 function getRandCapital() {
   const v = (Math.random()*4-1.5).toFixed(1);
-  return (v>=0?'+':'')+v+'亿';
+  const num = parseFloat(v);
+  return (num>=0?'+':'')+v+'亿';
 }
 
 // 带主力资金的表格
@@ -109,7 +139,9 @@ function renderWatchTableWithCapital(list) {
       const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
       const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
       const cap = getCapitalData(s.code);
-      const mainCls = cap.main.startsWith('+') ? 'up' : 'down';
+      const mainStr = cap.main || '+0亿';
+      const days5Str = cap.days5 || '+0亿';
+      const mainCls = mainStr.startsWith('+') ? 'up' : 'down';
       let stopDist = '—', stopCls = 'flat', statusTag = '<span class="factor-tag tag-positive">安全</span>';
       if (sl > 0 && cur > 0) {
         const dist = ((cur - sl) / sl * 100).toFixed(1);
@@ -121,14 +153,14 @@ function renderWatchTableWithCapital(list) {
       } else if (cap.risk === 'high') statusTag = '<span class="factor-tag tag-negative">警告</span>';
       else if (cap.risk === 'medium') statusTag = '<span class="factor-tag tag-neutral">注意</span>';
       return `<tr>
-        <td>${s.code}</td><td><b>${s.name}</b></td><td>${s.price}</td>
+        <td>${s.code||''}</td><td><b>${s.name||''}</b></td><td>${s.price||'—'}</td>
         <td>${s.addPrice || '—'}</td>
         <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
         <td class="up">${tp || '—'}</td>
         <td class="down">${sl || '—'}</td>
         <td class="${stopCls}">${stopDist}</td>
-        <td class="${mainCls}">${cap.main}</td>
-        <td class="${cap.days5.startsWith('+')?'up':'down'}">${cap.days5}</td>
+        <td class="${mainCls}">${mainStr}</td>
+        <td class="${days5Str.startsWith('+')?'up':'down'}">${days5Str}</td>
         <td>${statusTag}</td>
         <td>
           <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
