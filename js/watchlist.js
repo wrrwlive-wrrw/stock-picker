@@ -41,64 +41,67 @@ function removeFromWatchlist(code) {
   renderWatchlist(document.getElementById('mainContent'));
 }
 
-// 渲染自选股页面（异步以获取大盘环境）
-async function renderWatchlist(el) {
+// 渲染自选股页面
+function renderWatchlist(el) {
+  if (!el) { console.error('renderWatchlist: el is null'); return; }
   let list = getWatchlist();
-  // 确保list是有效数组，过滤无效项
   if (!Array.isArray(list)) list = [];
   list = list.filter(s => s && s.code && s.name);
+
+  // 调试信息
+  const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
+  console.log('renderWatchlist key:', key, 'count:', list.length);
+
+  let tableHtml = '';
+  let alertsHtml = '';
   try {
-    el.innerHTML = `
-      <div class="card">
-        <div class="card-title">我的自选股（${list.length}只）</div>
-        <div class="toolbar">
-          <input type="text" id="watchAddCode" placeholder="股票代码 如sh600519" style="width:160px">
-          <input type="text" id="watchAddName" placeholder="名称" style="width:100px">
-          <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
-          <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
-          <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
-        </div>
-        <div style="margin-top:8px;font-size:12px;color:#8b949e">
-          💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
-        </div>
-      </div>
-      <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据并生成每日体检报告...</p></div></div>
-      ${renderCapitalAlerts(list)}
-      ${renderOvervaluedAlerts(list)}
-      <div class="card">
-        <div class="card-title">持仓明细 & 主力资金动向</div>
-        ${list.length ? renderWatchTableWithCapital(list) : '<p style="color:#8b949e">暂无自选股，可手动添加或从投资建议页导入</p>'}
-      </div>
-    `;
+    tableHtml = list.length ? renderWatchTableWithCapital(list) : '<p style="color:#8b949e">暂无自选股，可手动添加或从投资建议页导入</p>';
+    alertsHtml = renderCapitalAlerts(list) + renderOvervaluedAlerts(list);
   } catch(e) {
-    console.error('renderWatchlist error:', e);
-    el.innerHTML = `<div class="card"><div class="card-title">我的自选股</div>
-      <p style="color:#ea3943">渲染出错：${e.message}</p>
-      <p style="color:#8b949e;font-size:12px">自选股数据：${list.length}条记录</p>
-      <div class="toolbar" style="margin-top:12px">
-        <input type="text" id="watchAddCode" placeholder="股票代码" style="width:160px">
+    console.error('renderWatchlist table error:', e);
+    tableHtml = '<p style="color:#ea3943">表格渲染出错：' + e.message + '</p>';
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">我的自选股（${list.length}只）</div>
+      <div class="toolbar">
+        <input type="text" id="watchAddCode" placeholder="股票代码 如sh600519" style="width:160px">
         <input type="text" id="watchAddName" placeholder="名称" style="width:100px">
         <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
-      </div></div>`;
-    return;
-  }
-  // 异步渲染每日体检
+        <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#8b949e">
+        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
+      </div>
+    </div>
+    <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据...</p></div></div>
+    ${alertsHtml}
+    <div class="card">
+      <div class="card-title">持仓明细 & 主力资金动向</div>
+      ${tableHtml}
+    </div>
+  `;
+
+  // 异步加载每日体检（不影响主体渲染）
+  loadDailyReport(list);
+}
+
+async function loadDailyReport(list) {
+  const dailyArea = document.getElementById('dailyReportArea');
+  if (!dailyArea) return;
+  if (!list.length) { dailyArea.innerHTML = ''; return; }
   try {
-    if (list.length && typeof getMarketContext === 'function') {
+    if (typeof getMarketContext === 'function') {
       const marketCtx = await getMarketContext();
-      const dailyArea = document.getElementById('dailyReportArea');
-      if (dailyArea) {
-        dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
-      }
+      dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
     } else {
-      const dailyArea = document.getElementById('dailyReportArea');
-      if (dailyArea) dailyArea.innerHTML = '';
+      dailyArea.innerHTML = '';
     }
   } catch(e) {
-    console.error('dailyReport error:', e);
-    const dailyArea = document.getElementById('dailyReportArea');
-    if (dailyArea) dailyArea.innerHTML = `<div class="card"><p style="color:#d29922">每日体检加载失败：${e.message}</p></div>`;
+    console.error('loadDailyReport error:', e);
+    dailyArea.innerHTML = '<div class="card"><p style="color:#d29922">每日体检加载失败：' + e.message + '</p></div>';
   }
 }
 
