@@ -13,7 +13,10 @@ const MENUS = {
   admin: [
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
+    {id:'ai-agent',label:'🧠 AI智能体'},
     {id:'watchlist',label:'⭐ 自选股'},
+    {id:'reports',label:'📋 分析报告'},
+    {id:'research',label:'📺 资料研究'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
     {id:'query',label:'🔍 个股查询'},
@@ -24,7 +27,10 @@ const MENUS = {
   vip: [
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
+    {id:'ai-agent',label:'🧠 AI智能体'},
     {id:'watchlist',label:'⭐ 自选股'},
+    {id:'reports',label:'📋 分析报告'},
+    {id:'research',label:'📺 资料研究'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
     {id:'query',label:'🔍 个股查询'},
@@ -34,7 +40,10 @@ const MENUS = {
   user: [
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
+    {id:'ai-agent',label:'🧠 AI智能体'},
     {id:'watchlist',label:'⭐ 自选股'},
+    {id:'reports',label:'📋 分析报告'},
+    {id:'research',label:'📺 资料研究'},
     {id:'methodology',label:'📖 选股方法论'},
     {id:'macro',label:'🌍 宏观分析'},
     {id:'query',label:'🔍 个股查询'},
@@ -90,11 +99,14 @@ function navigate(page) {
   switch(page) {
     case 'market': renderMarket(content); break;
     case 'daily': renderDailyAI(content); break;
+    case 'ai-agent': renderAIAgent(content); break;
     case 'watchlist': renderWatchlist(content); break;
     case 'methodology': renderMethodology(content); break;
     case 'macro': renderMacro(content); break;
     case 'query': renderStockQuery(content); break;
     case 'strategy': renderStrategy(content); break;
+    case 'reports': renderReportsPage(content); break;
+    case 'research': renderVideoResearch(content); break;
     case 'recommend': renderRecommend(content); break;
     case 'users': renderUserManage(content); break;
   }

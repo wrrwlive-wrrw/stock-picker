@@ -1,0 +1,76 @@
+{
+  "exportTime": "2026-07-13T12:07:58.442Z",
+  "user": "admin",
+  "stocks": [
+    {
+      "code": "002439",
+      "name": "启明星辰",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "300035",
+      "name": "中科电气",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "300290",
+      "name": "荣科",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "300348",
+      "name": "长亮科技",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "300779",
+      "name": "惠",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "301046",
+      "name": "熊辉科技",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    },
+    {
+      "code": "601567",
+      "name": "三星电气",
+      "price": "—",
+      "reason": "手动添加",
+      "addDate": "2026-07-13",
+      "addPrice": "—",
+      "targetPrice": "",
+      "stopLoss": ""
+    }
+  ]
+}

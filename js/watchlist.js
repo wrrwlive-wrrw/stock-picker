@@ -90,6 +90,11 @@ function renderWatchlist(el) {
         <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
         <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
+        <span style="margin-left:12px;border-left:1px solid #30363d;padding-left:12px">
+          <button class="btn" style="background:#238636;color:#fff" onclick="exportWatchlist()">导出自选股</button>
+          <button class="btn" style="background:#1f6feb;color:#fff" onclick="document.getElementById('importFileInput').click()">导入自选股</button>
+          <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importWatchlist(event)">
+        </span>
       </div>
       <div style="margin-top:8px;font-size:12px;color:#8b949e">
         💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
@@ -415,4 +420,56 @@ function renderExitAlerts(list, marketCtx) {
       </div>`;
     }).join('')}
   </div>`;
+}
+
+// 导出自选股为 JSON 文件
+function exportWatchlist() {
+  const list = getWatchlist();
+  if (!list.length) { alert('自选股为空，无需导出'); return; }
+  const data = {
+    exportTime: new Date().toISOString(),
+    user: currentUser?.username || 'guest',
+    stocks: list
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'watchlist_' + (currentUser?.username||'guest') + '_' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// 导入自选股从 JSON 文件
+function importWatchlist(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      const importList = Array.isArray(data.stocks) ? data.stocks : (Array.isArray(data) ? data : null);
+      if (!importList) { alert('文件格式不正确'); return; }
+      const currentList = getWatchlist();
+      let added = 0;
+      importList.forEach(s => {
+        if (!s.code || !s.name) return;
+        if (!currentList.find(c => c.code === s.code)) {
+          currentList.push(s);
+          added++;
+        }
+      });
+      if (saveWatchlist(currentList)) {
+        alert('导入成功，新增 ' + added + ' 只股票（已跳过重复）');
+      }
+      renderWatchlist(document.getElementById('mainContent'));
+    } catch(err) {
+      alert('导入失败：文件解析错误');
+      console.error('importWatchlist error:', err);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
