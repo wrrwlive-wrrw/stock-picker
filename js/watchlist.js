@@ -22,14 +22,37 @@ function saveWatchlist(list) {
   }
 }
 
+// 选股方法标签定义
+const METHOD_TAGS = [
+  '价值投资','趋势投资','基本面优秀','技术面突破','板块轮动',
+  '超跌反弹','高分红','成长股','国产替代','行业龙头',
+  '政策驱动','低PE低PB','高ROE','资金流入','AI概念',
+  '新能源','半导体','消费白马','周期股','防御配置'
+];
+
+// 获取自选股中实际使用的方法标签（去重排序）
+function getMethodFilterTags(list) {
+  const tags = new Set();
+  list.forEach(s => (s.methods || []).forEach(m => tags.add(m)));
+  return [...tags].sort();
+}
+
+// 按方法标签筛选自选股
+let currentMethodFilter = '';
+function filterWatchlist(tag) {
+  currentMethodFilter = tag;
+  renderWatchlist(document.getElementById('mainContent'));
+}
+
 // 添加自选股（不再弹出prompt，直接添加）
-function addToWatchlist(code, name, price, reason) {
+function addToWatchlist(code, name, price, reason, methods) {
   if (!currentUser) { alert('请先登录'); return; }
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
   list.push({
     code, name, price: price || '—',
     reason: reason || '',
+    methods: Array.isArray(methods) ? methods : [],
     addDate: new Date().toISOString().slice(0, 10),
     addPrice: price || '—',
     targetPrice: '',
@@ -51,9 +74,19 @@ function removeFromWatchlist(code) {
 // 渲染自选股页面
 function renderWatchlist(el) {
   if (!el) { console.error('renderWatchlist: el is null'); return; }
+  // 如果是重新加载页面，保留筛选状态；首次加载重置筛选
+  if (!document.getElementById('watchAddCode')) currentMethodFilter = '';
   let list = getWatchlist();
   if (!Array.isArray(list)) list = [];
   list = list.filter(s => s && s.code && s.name);
+
+  // 计算所有可用的筛选标签（在筛选前）
+  const allFilterTags = getMethodFilterTags(list);
+
+  // 应用选股方法筛选
+  if (currentMethodFilter) {
+    list = list.filter(s => (s.methods || []).includes(currentMethodFilter));
+  }
 
   // 如果当前用户无数据，检查是否存在guest数据（修复key不匹配问题）
   if (!list.length && currentUser) {
@@ -96,8 +129,16 @@ function renderWatchlist(el) {
           <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importWatchlist(event)">
         </span>
       </div>
+      ${list.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+        <span style="font-size:12px;color:#8b949e;margin-right:4px">按选股方法筛选：</span>
+        <button class="btn btn-sm" onclick="filterWatchlist('')" style="font-size:11px;padding:2px 8px;background:${!currentMethodFilter?'#1f6feb':'#21262d'};color:#fff;border:1px solid ${!currentMethodFilter?'#1f6feb':'#30363d'}">全部</button>
+        ${allFilterTags.map(tag => {
+          const isActive = currentMethodFilter === tag;
+          return `<button class="btn btn-sm" onclick="filterWatchlist('${tag}')" style="font-size:11px;padding:2px 8px;background:${isActive?'#1f6feb':'#21262d'};color:#fff;border:1px solid ${isActive?'#1f6feb':'#30363d'}">${tag}</button>`;
+        }).join('')}
+      </div>` : ''}
       <div style="margin-top:8px;font-size:12px;color:#8b949e">
-        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号
+        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号。点击"编辑"可设置选股方法标签。
       </div>
     </div>
     <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据...</p></div></div>
@@ -154,6 +195,26 @@ function getRandCapital() {
   return (num>=0?'+':'')+v+'亿';
 }
 
+// 选股方法颜色映射
+function getMethodTagColor(method) {
+  const map = {
+    '价值投资':'#238636','行业龙头':'#58a6ff','高ROE':'#238636','消费白马':'#f0883e',
+    '新能源':'#16c784','成长股':'#a371f7','AI概念':'#a371f7','政策驱动':'#d29922',
+    '国产替代':'#58a6ff','半导体':'#58a6ff','超跌反弹':'#ea3943','高分红':'#238636',
+    '低PE低PB':'#238636','技术面突破':'#a371f7','资金流入':'#16c784','防御配置':'#8b949e',
+    '趋势投资':'#a371f7','板块轮动':'#d29922','基本面优秀':'#238636','周期股':'#f0883e',
+    '光伏':'#16c784','储能':'#16c784'
+  };
+  return map[method] || '#8b949e';
+}
+
+function renderMethodTags(methods) {
+  if (!methods || !methods.length) return '';
+  return `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px">
+    ${methods.map(m => `<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:${getMethodTagColor(m)}22;color:${getMethodTagColor(m)};border:1px solid ${getMethodTagColor(m)}44">${m}</span>`).join('')}
+  </div>`;
+}
+
 // 带主力资金的表格
 function renderWatchTableWithCapital(list) {
   return `<div style="overflow-x:auto"><table class="data-table">
@@ -180,7 +241,9 @@ function renderWatchTableWithCapital(list) {
       } else if (cap.risk === 'high') statusTag = '<span class="factor-tag tag-negative">警告</span>';
       else if (cap.risk === 'medium') statusTag = '<span class="factor-tag tag-neutral">注意</span>';
       return `<tr>
-        <td>${s.code||''}</td><td><b>${s.name||''}</b></td><td>${s.price||'—'}</td>
+        <td>${s.code||''}</td>
+        <td><b>${s.name||''}</b>${renderMethodTags(s.methods)}</td>
+        <td>${s.price||'—'}</td>
         <td>${s.addPrice || '—'}</td>
         <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
         <td class="up">${tp || '—'}</td>
@@ -303,6 +366,7 @@ function manualAddWatch() {
   list.push({
     code, name, price: price || '—',
     reason: '手动添加',
+    methods: [],
     addDate: new Date().toISOString().slice(0, 10),
     addPrice: price || '—',
     targetPrice: '', stopLoss: ''
@@ -317,14 +381,14 @@ function manualAddWatch() {
 function addRecommendStocks() {
   if (!currentUser) { alert('请先登录'); return; }
   const recommends = [
-    {code:'sh600519',name:'贵州茅台',price:'1756',reason:'白酒龙头，ROE>30%',targetPrice:'1900',stopLoss:'1650'},
-    {code:'sz300750',name:'宁德时代',price:'218.5',reason:'动力电池全球龙头',targetPrice:'250',stopLoss:'200'},
-    {code:'sz002594',name:'比亚迪',price:'285.6',reason:'新能源车龙头，智驾+出海',targetPrice:'320',stopLoss:'260'},
-    {code:'sh601012',name:'隆基绿能',price:'25.8',reason:'光伏龙头超跌反弹',targetPrice:'32',stopLoss:'22'},
-    {code:'sh688981',name:'中芯国际',price:'78.9',reason:'半导体国产替代核心',targetPrice:'90',stopLoss:'72'},
-    {code:'sz002371',name:'北方华创',price:'345',reason:'半导体设备龙头',targetPrice:'380',stopLoss:'320'},
-    {code:'sh603501',name:'韦尔股份',price:'98.5',reason:'CIS芯片龙头',targetPrice:'110',stopLoss:'88'},
-    {code:'sz000333',name:'美的集团',price:'68.3',reason:'家电白马，稳定分红',targetPrice:'78',stopLoss:'62'},
+    {code:'sh600519',name:'贵州茅台',price:'1756',reason:'白酒龙头，ROE>30%',targetPrice:'1900',stopLoss:'1650',methods:['价值投资','行业龙头','高ROE','消费白马']},
+    {code:'sz300750',name:'宁德时代',price:'218.5',reason:'动力电池全球龙头',targetPrice:'250',stopLoss:'200',methods:['行业龙头','新能源','成长股','政策驱动']},
+    {code:'sz002594',name:'比亚迪',price:'285.6',reason:'新能源车龙头，智驾+出海',targetPrice:'320',stopLoss:'260',methods:['行业龙头','新能源','成长股','政策驱动','AI概念']},
+    {code:'sh601012',name:'隆基绿能',price:'25.8',reason:'光伏龙头超跌反弹',targetPrice:'32',stopLoss:'22',methods:['超跌反弹','新能源','行业龙头']},
+    {code:'sh688981',name:'中芯国际',price:'78.9',reason:'半导体国产替代核心',targetPrice:'90',stopLoss:'72',methods:['国产替代','半导体','政策驱动','行业龙头']},
+    {code:'sz002371',name:'北方华创',price:'345',reason:'半导体设备龙头',targetPrice:'380',stopLoss:'320',methods:['国产替代','半导体','行业龙头','成长股']},
+    {code:'sh603501',name:'韦尔股份',price:'98.5',reason:'CIS芯片龙头',targetPrice:'110',stopLoss:'88',methods:['半导体','国产替代','成长股']},
+    {code:'sz000333',name:'美的集团',price:'68.3',reason:'家电白马，稳定分红',targetPrice:'78',stopLoss:'62',methods:['价值投资','高分红','消费白马','低PE低PB']},
   ];
   const list = getWatchlist();
   let added = 0;
@@ -340,15 +404,24 @@ function addRecommendStocks() {
   renderWatchlist(document.getElementById('mainContent'));
 }
 
-// 编辑自选股目标价/止损价
+// 编辑自选股（弹窗编辑）
 function editWatchStock(code) {
   const list = getWatchlist();
   const stock = list.find(s => s.code === code);
   if (!stock) return;
-  const tp = prompt(`编辑 ${stock.name} 的目标价：`, stock.targetPrice || '');
-  const sl = prompt(`编辑 ${stock.name} 的止损价：`, stock.stopLoss || '');
+  // 使用多步prompt收集信息
+  const tp = prompt(`编辑 ${stock.name} 的目标价（当前：${stock.targetPrice || '未设置'}）：`, stock.targetPrice || '');
+  const sl = prompt(`编辑 ${stock.name} 的止损价（当前：${stock.stopLoss || '未设置'}）：`, stock.stopLoss || '');
+  const r = prompt(`编辑 ${stock.name} 的买入理由（当前：${stock.reason || ''}）：`, stock.reason || '');
+  // 选股方法：逗号分隔
+  const currentMethods = (stock.methods || []).join('、');
+  const m = prompt(`编辑选股方法（当前：${currentMethods || '无'}）\n可选标签：${METHOD_TAGS.join('、')}\n多个用逗号分隔，如：价值投资,行业龙头,高分红`, currentMethods);
   if (tp !== null) stock.targetPrice = tp;
   if (sl !== null) stock.stopLoss = sl;
+  if (r !== null) stock.reason = r;
+  if (m !== null) {
+    stock.methods = m.split(/[,，、]/).map(s=>s.trim()).filter(s=>s);
+  }
   saveWatchlist(list);
   renderWatchlist(document.getElementById('mainContent'));
 }

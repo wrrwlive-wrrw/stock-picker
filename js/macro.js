@@ -1,4 +1,102 @@
 // 宏观因素分析模块
+// 全球市场实时数据缓存
+let globalMarketCache = { data: null, ts: 0 };
+const GLOBAL_CACHE_TTL = 300000; // 5分钟缓存
+
+// 获取全球市场实时数据
+async function fetchGlobalMarketData() {
+  const now = Date.now();
+  if (globalMarketCache.data && (now - globalMarketCache.ts) < GLOBAL_CACHE_TTL) {
+    return globalMarketCache.data;
+  }
+  const proxy = 'https://api.allorigins.win/raw?url=';
+  const codes = [
+    { id:'hsi', code:'hkHSI', name:'恒生指数' },
+    { id:'hstech', code:'hkHSTECH', name:'恒生科技' },
+    { id:'nk225', code:'jnkNI225', name:'日经225' },
+    { id:'kospi', code:'kriKOSPI', name:'KOSPI' },
+    { id:'kosdaq', code:'kriKOSDAQ', name:'KOSDAQ' },
+    { id:'sh', code:'sh000001', name:'上证指数' },
+    { id:'cyb', code:'sz399006', name:'创业板指' }
+  ];
+  const url = `https://qt.gtimg.cn/q=${codes.map(c=>c.code).join(',')}`;
+  try {
+    const resp = await fetch(proxy + encodeURIComponent(url));
+    const text = await resp.text();
+    const result = {};
+    codes.forEach(c => {
+      const regex = new RegExp(`v_${c.code}="([^"]*)"`);
+      const m = text.match(regex);
+      if (m) {
+        const parts = m[1].split('~');
+        result[c.id] = {
+          name: c.name, price: parts[3] || '—',
+          change: parts[31] || parts[32] || '0',
+          changePct: parts[32] || '0',
+          high: parts[33] || '—', low: parts[34] || '—',
+          volume: parts[6] || '—', amount: parts[37] || '—'
+        };
+      }
+    });
+    globalMarketCache = { data: result, ts: now };
+    return result;
+  } catch(e) {
+    console.warn('全球市场数据获取失败:', e.message);
+    return globalMarketCache.data || {};
+  }
+}
+
+// 获取港股/AH股/南向数据
+async function fetchHKExtraData() {
+  const proxy = 'https://api.allorigins.win/raw?url=';
+  const url = 'https://qt.gtimg.cn/q=hkHSI,hk00700,hk09988,hk03690,hk01810,hk09618,hk02015,hkAH溢价';
+  try {
+    const resp = await fetch(proxy + encodeURIComponent(url));
+    const text = await resp.text();
+    const stocks = {};
+    const stockCodes = [
+      {code:'hk00700',name:'腾讯控股'},{code:'hk09988',name:'阿里巴巴'},
+      {code:'hk03690',name:'美团'},{code:'hk01810',name:'小米集团'},
+      {code:'hk09618',name:'京东集团'},{code:'hk02015',name:'理想汽车'}
+    ];
+    stockCodes.forEach(s => {
+      const regex = new RegExp(`v_${s.code}="([^"]*)"`);
+      const m = text.match(regex);
+      if (m) {
+        const p = m[1].split('~');
+        stocks[s.code] = { name:s.name, price:p[3]||'—', changePct:p[32]||'0' };
+      }
+    });
+    return stocks;
+  } catch(e) { return {}; }
+}
+
+// 获取日韩股市关键个股
+async function fetchJapanKoreaData() {
+  const proxy = 'https://api.allorigins.win/raw?url=';
+  const url = 'https://qt.gtimg.cn/q=jnk7203,jnk6758,jnk8306,jnk9984,jnk6501,jnk7974,kri005930,kri000660,kri035420,kri029500';
+  try {
+    const resp = await fetch(proxy + encodeURIComponent(url));
+    const text = await resp.text();
+    const stocks = {};
+    const map = {
+      'jnk7203':'丰田汽车','jnk6758':'索尼集团','jnk8306':'三菱UFJ',
+      'jnk9984':'软银集团','jnk6501':'日立制作所','jnk7974':'任天堂',
+      'kri005930':'三星电子','kri000660':'SK海力士','kri035420':'Naver',
+      'kri029500':'LG电子'
+    };
+    for (const [code, name] of Object.entries(map)) {
+      const regex = new RegExp(`v_${code}="([^"]*)"`);
+      const m = text.match(regex);
+      if (m) {
+        const p = m[1].split('~');
+        stocks[code] = { name, price:p[3]||'—', changePct:p[32]||'0' };
+      }
+    }
+    return stocks;
+  } catch(e) { return {}; }
+}
+
 function renderMacro(el) {
   el.innerHTML = `
     <div class="card">
@@ -7,6 +105,9 @@ function renderMacro(el) {
         <div class="tab active" onclick="showMacroTab('domestic')">国内经济</div>
         <div class="tab" onclick="showMacroTab('global')">全球股市</div>
         <div class="tab" onclick="showMacroTab('us')">美国市场</div>
+        <div class="tab" onclick="showMacroTab('hk')">🇭🇰 港股</div>
+        <div class="tab" onclick="showMacroTab('jp')">🇯🇵 日股</div>
+        <div class="tab" onclick="showMacroTab('kr')">🇰🇷 韩股</div>
         <div class="tab" onclick="showMacroTab('policy')">政策面</div>
         <div class="tab" onclick="showMacroTab('policyImpact')">政策影响</div>
         <div class="tab" onclick="showMacroTab('linkage')">联动关系</div>
@@ -18,17 +119,28 @@ function renderMacro(el) {
 }
 
 function showMacroTab(tab) {
+  const tabNames = {
+    domestic:'国内经济',global:'全球股市',us:'美国市场',
+    hk:'🇭🇰 港股',jp:'🇯🇵 日股',kr:'🇰🇷 韩股',
+    policy:'政策面',policyImpact:'政策影响',linkage:'联动关系'
+  };
   document.querySelectorAll('.card .tabs .tab').forEach(el => {
-    const map = {domestic:'国内经济',global:'全球股市',us:'美国市场',policy:'政策面',policyImpact:'政策影响',linkage:'联动关系'};
-    el.classList.toggle('active', el.textContent === map[tab]);
+    el.classList.toggle('active', el.textContent === tabNames[tab]);
   });
   const content = document.getElementById('macroContent');
-  const r = {domestic:getDomesticContent,global:getGlobalMarketsContent,us:getUSMarketContent,policy:getPolicyContent,policyImpact:getPolicyImpactContent,linkage:getLinkageContent};
-  if (r[tab]) content.innerHTML = r[tab]();
+  const r = {
+    domestic:getDomesticContent, global:getGlobalMarketsContent, us:getUSMarketContent,
+    hk:getHKMarketContent, jp:getJapanMarketContent, kr:getKoreaMarketContent,
+    policy:getPolicyContent, policyImpact:getPolicyImpactContent, linkage:getLinkageContent
+  };
+  if (r[tab]) {
+    content.innerHTML = '<p style="color:#58a6ff;font-size:12px">正在加载实时数据...</p>';
+    r[tab]().then(html => { content.innerHTML = html; });
+  }
 }
 
 function getDomesticContent() {
-  return `<div class="factor-grid">
+  return Promise.resolve(`<div class="factor-grid">
     <div class="factor-card">
       <h4>央行货币政策</h4>
       <p><b>降准：</b>释放流动性，利好银行、地产、股市整体<br>
@@ -60,11 +172,238 @@ function getDomesticContent() {
       <b>社融超预期：</b>信用扩张，实体经济活跃<br>
       <b>M1-M2剪刀差：</b>收窄→资金活化→股市有望</p>
     </div>
+  </div>`);
+}
+
+// ========== 港股分析 ==========
+async function getHKMarketContent() {
+  const [globalData, hkExtra] = await Promise.all([fetchGlobalMarketData(), fetchHKExtraData()]);
+  const hsi = globalData.hsi || {};
+  const hstech = globalData.hstech || {};
+
+  const renderStockRow = (code, data) => {
+    if (!data) return '';
+    const cls = parseFloat(data.changePct) >= 0 ? 'up' : 'down';
+    return `<tr><td>${data.name}</td><td>${data.price}</td><td class="${cls}">${data.changePct>0?'+':''}${data.changePct}%</td></tr>`;
+  };
+
+  return `<div class="factor-grid">
+    <div class="factor-card" style="border-top:3px solid #f0883e">
+      <h4>🇭🇰 港股实时行情</h4>
+      <table class="data-table" style="font-size:12px;margin-top:8px">
+        <tr><th>指数</th><th>点位</th><th>涨跌幅</th></tr>
+        ${hsi.name ? `<tr><td><b>${hsi.name}</b></td><td>${hsi.price}</td><td class="${parseFloat(hsi.changePct)>=0?'up':'down'}">${hsi.changePct>0?'+':''}${hsi.changePct}%</td></tr>` : ''}
+        ${hstech.name ? `<tr><td><b>${hstech.name}</b></td><td>${hstech.price}</td><td class="${parseFloat(hstech.changePct)>=0?'up':'down'}">${hstech.changePct>0?'+':''}${hstech.changePct}%</td></tr>` : ''}
+      </table>
+      <h4 style="margin-top:12px">港股核心个股</h4>
+      <table class="data-table" style="font-size:12px">
+        <tr><th>股票</th><th>现价</th><th>涨跌幅</th></tr>
+        ${Object.entries(hkExtra).map(([k,v]) => renderStockRow(k,v)).join('')}
+      </table>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #f0883e">
+      <h4>🇭🇰 港股宏观分析框架</h4>
+      <p><b>核心定位：</b>中国资产定价锚，外资情绪风向标</p>
+      <p style="margin-top:6px"><b>关键驱动因素：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li><b>美联储利率政策：</b>港元挂钩美元，美联储加息→港股流动性收紧</li>
+        <li><b>中国基本面：</b>港股盈利80%来自内地企业，A股经济数据直接影响</li>
+        <li><b>南向资金：</b>内地资金持续流入是港股最大增量来源</li>
+        <li><b>地缘政治：</b>中美关系、科技制裁对港股科技股冲击最大</li>
+      </ul>
+      <div style="margin-top:8px">
+        <span class="factor-tag tag-positive">降息周期→港股反弹</span>
+        <span class="factor-tag tag-negative">中美脱钩→港股承压</span>
+      </div>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #f0883e">
+      <h4>🇭🇰 AH溢价指数与套利</h4>
+      <p><b>AH溢价指数含义：</b>衡量A股相对H股的溢价水平</p>
+      <table class="data-table" style="font-size:11px;margin-top:6px">
+        <tr><th>AH溢价区间</th><th>含义</th><th>操作建议</th></tr>
+        <tr><td>>140</td><td>A股严重溢价</td><td class="up">港股有估值修复机会</td></tr>
+        <tr><td>120-140</td><td>A股合理溢价</td><td>关注AH折价标的</td></tr>
+        <tr><td>100-120</td><td>溢价收窄</td><td>A/H价差趋同</td></tr>
+        <tr><td><100</td><td>H股溢价</td><td class="down">罕见，A股可能低估</td></tr>
+      </table>
+      <p style="font-size:11px;color:#8b949e;margin-top:6px">
+        <b>实战策略：</b>当AH溢价>140时，优先配置港股通标的（如腾讯/美团/小米），
+        享受估值修复红利。AH溢价收窄时切换回A股。
+      </p>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #f0883e">
+      <h4>🇭🇰 南向资金与板块映射</h4>
+      <table class="data-table" style="font-size:11px;margin-top:6px">
+        <tr><th>港股板块</th><th>A股映射</th><th>联动逻辑</th></tr>
+        <tr><td>腾讯/美团上涨</td><td class="up">A股互联网/消费</td><td>中国互联网重估</td></tr>
+        <tr><td>小米/Ideal上涨</td><td class="up">A股智能硬件/汽车链</td><td>消费电子复苏</td></tr>
+        <tr><td>港交所上涨</td><td class="up">A股券商/金融</td><td>市场活跃度提升</td></tr>
+        <tr><td>比亚迪H股上涨</td><td class="up">A股比亚迪</td><td>AH联动上涨</td></tr>
+        <tr><td>中海油/中石油H涨</td><td class="up">A股三桶油</td><td>能源股AH联动</td></tr>
+      </table>
+      <div class="tip-box" style="margin-top:10px">
+        <b>港股投资要点：</b>港股流动性低于A股，波动更大。
+        优先选择南向资金持续流入的标的，关注AH溢价指数变化。
+        港股通红利税20%需考虑（H股分红实际税负）。
+      </div>
+    </div>
+  </div>`;
+}
+
+// ========== 日股分析 ==========
+async function getJapanMarketContent() {
+  const [globalData, jpData] = await Promise.all([fetchGlobalMarketData(), fetchJapanKoreaData()]);
+  const nk = globalData.nk225 || {};
+
+  return `<div class="factor-grid">
+    <div class="factor-card" style="border-top:3px solid #ea3943">
+      <h4>🇯🇵 日经225实时行情</h4>
+      <table class="data-table" style="font-size:12px;margin-top:8px">
+        <tr><th>指数</th><th>点位</th><th>涨跌幅</th></tr>
+        ${nk.name ? `<tr><td><b>${nk.name}</b></td><td>${nk.price}</td><td class="${parseFloat(nk.changePct)>=0?'up':'down'}">${nk.changePct>0?'+':''}${nk.changePct}%</td></tr>` : ''}
+      </table>
+      <h4 style="margin-top:12px">日股核心个股</h4>
+      <table class="data-table" style="font-size:12px">
+        <tr><th>股票</th><th>现价</th><th>涨跌幅</th></tr>
+        ${Object.entries(jpData).filter(([k])=>k.startsWith('jnk')).map(([k,v]) => {
+          const cls = parseFloat(v.changePct)>=0?'up':'down';
+          return `<tr><td>${v.name}</td><td>${v.price}</td><td class="${cls}">${v.changePct>0?'+':''}${v.changePct}%</td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #ea3943">
+      <h4>🇯🇵 日本股市宏观分析框架</h4>
+      <p><b>核心定位：</b>全球第三大股市，亚太资金流向重要参考</p>
+      <p style="margin-top:6px"><b>关键驱动因素：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li><b>日银(BOJ)货币政策：</b>结束负利率后，日元走势成关键变量</li>
+        <li><b>日元汇率：</b>日元贬值→出口企业受益（丰田/索尼）→日股上涨</li>
+        <li><b>全球半导体周期：</b>日本半导体设备/材料是全球关键环节</li>
+        <li><b>巴菲特效应：</b>增持日本五大商社→全球关注低PB高分红策略</li>
+      </ul>
+      <div style="margin-top:8px">
+        <span class="factor-tag tag-positive">日元贬值→日股涨</span>
+        <span class="factor-tag tag-negative">日元急升→套息逆转</span>
+      </div>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #ea3943">
+      <h4>🇯🇵 日股对A股传导路径</h4>
+      <table class="data-table" style="font-size:11px;margin-top:6px">
+        <tr><th>日股信号</th><th>传导机制</th><th>A股影响</th></tr>
+        <tr><td>日经创新高</td><td>全球风险偏好提升</td><td class="up">间接利好A股</td></tr>
+        <tr><td>丰田/本田上涨</td><td>日本车企竞争力增强</td><td class="down">A股汽车出口承压</td></tr>
+        <tr><td>东京电子上涨</td><td>半导体设备景气</td><td class="up">A股半导体设备链</td></tr>
+        <tr><td>日元急贬(>160)</td><td>亚洲货币竞争性贬值</td><td>人民币承压，出口链受益</td></tr>
+        <tr><td>软银集团大涨</td><td>AI投资情绪回暖</td><td class="up">A股AI板块情绪提振</td></tr>
+        <tr><td>任天堂大涨</td><td>游戏/娱乐消费复苏</td><td class="up">A股游戏板块联动</td></tr>
+      </table>
+      <p style="font-size:11px;color:#8b949e;margin-top:6px">
+        <b>重点关注：</b>日本央行利率决议（每月一次）、日元汇率（USD/JPY）走势、
+        丰田/软银等权重股财报。
+      </p>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #ea3943">
+      <h4>🇯🇵 日股投资策略</h4>
+      <p style="font-size:12px"><b>通过QDII基金参与：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li>华夏野村日经225ETF（513880）— 跟踪日经225指数</li>
+        <li>华安日经225ETF（513880）— 被动跟踪</li>
+        <li>易方达日经ETF — 覆盖东证指数</li>
+      </ul>
+      <p style="font-size:12px;margin-top:8px"><b>布局时机判断：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li>日元贬值+BOJ维持宽松 → 日股上涨动力强</li>
+        <li>全球半导体周期上行 → 日本设备/材料股受益</li>
+        <li>巴菲特增持日本商社 → 低PB高分红策略确认</li>
+        <li>日经突破历史新高后回踩 → 趋势延续信号</li>
+      </ul>
+      <div class="tip-box" style="margin-top:10px">
+        <b>风险提示：</b>日元套息交易逆转（日元急升）会导致全球资金回流日本，
+        短期对A股/港股形成抛压。关注USD/JPY跌破150的风险信号。
+      </div>
+    </div>
+  </div>`;
+}
+
+// ========== 韩股分析 ==========
+async function getKoreaMarketContent() {
+  const [globalData, krData] = await Promise.all([fetchGlobalMarketData(), fetchJapanKoreaData()]);
+  const kospi = globalData.kospi || {};
+  const kosdaq = globalData.kosdaq || {};
+
+  return `<div class="factor-grid">
+    <div class="factor-card" style="border-top:3px solid #58a6ff">
+      <h4>🇰🇷 韩国股市实时行情</h4>
+      <table class="data-table" style="font-size:12px;margin-top:8px">
+        <tr><th>指数</th><th>点位</th><th>涨跌幅</th></tr>
+        ${kospi.name ? `<tr><td><b>${kospi.name}</b></td><td>${kospi.price}</td><td class="${parseFloat(kospi.changePct)>=0?'up':'down'}">${kospi.changePct>0?'+':''}${kospi.changePct}%</td></tr>` : ''}
+        ${kosdaq.name ? `<tr><td><b>${kosdaq.name}</b></td><td>${kosdaq.price}</td><td class="${parseFloat(kosdaq.changePct)>=0?'up':'down'}">${kosdaq.changePct>0?'+':''}${kosdaq.changePct}%</td></tr>` : ''}
+      </table>
+      <h4 style="margin-top:12px">韩股核心个股</h4>
+      <table class="data-table" style="font-size:12px">
+        <tr><th>股票</th><th>现价</th><th>涨跌幅</th></tr>
+        ${Object.entries(krData).filter(([k])=>k.startsWith('kri')).map(([k,v]) => {
+          const cls = parseFloat(v.changePct)>=0?'up':'down';
+          return `<tr><td>${v.name}</td><td>${v.price}</td><td class="${cls}">${v.changePct>0?'+':''}${v.changePct}%</td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #58a6ff">
+      <h4>🇰🇷 韩国股市宏观分析框架</h4>
+      <p><b>核心定位：</b>全球半导体产业风向标，三星/SK海力士为指标</p>
+      <p style="margin-top:6px"><b>关键驱动因素：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li><b>全球存储芯片周期：</b>三星/SK海力士占全球DRAM 70%+，价格走势决定韩股方向</li>
+        <li><b>HBM(高带宽内存)需求：</b>AI算力爆发→HBM供不应求→韩股存储链受益</li>
+        <li><b>韩元汇率：</b>韩元贬值→出口竞争力增强→三星/LG出口受益</li>
+        <li><b>企业价值提升计划：</b>韩国版"中特估"，推动低PB企业改善公司治理</li>
+      </ul>
+      <div style="margin-top:8px">
+        <span class="factor-tag tag-positive">存储涨价→韩股存储链</span>
+        <span class="factor-tag tag-negative">HBM竞争加剧→承压</span>
+      </div>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #58a6ff">
+      <h4>🇰🇷 韩股对A股传导路径</h4>
+      <table class="data-table" style="font-size:11px;margin-top:6px">
+        <tr><th>韩股信号</th><th>传导机制</th><th>A股影响</th></tr>
+        <tr><td>三星电子大涨</td><td>存储芯片涨价确认</td><td class="up">兆易创新/长江存储概念</td></tr>
+        <tr><td>SK海力士大涨</td><td>HBM供不应求</td><td class="up">A股存储/封装链</td></tr>
+        <tr><td>KOSDAQ科技股领涨</td><td>创业板情绪共振</td><td class="up">A股小盘科技活跃</td></tr>
+        <tr><td>现代汽车上涨</td><td>电动车/氢能源景气</td><td class="up">A股新能源车产业链</td></tr>
+        <tr><td>韩元贬值(>1400)</td><td>亚洲货币竞争贬值</td><td>人民币承压，出口链受益</td></tr>
+        <tr><td>三星造船大涨</td><td>全球船舶订单回暖</td><td class="up">A股中国船舶/中国重工</td></tr>
+      </table>
+      <p style="font-size:11px;color:#8b949e;margin-top:6px">
+        <b>重点关注：</b>三星电子季度财报、SK海力士HBM产能规划、
+        韩国央行利率决议、DRAM/NAND现货价格走势。
+      </p>
+    </div>
+    <div class="factor-card" style="border-top:3px solid #58a6ff">
+      <h4>🇰🇷 韩股投资策略</h4>
+      <p style="font-size:12px"><b>通过QDII基金参与：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li>华泰柏瑞南方东英韩国综合指数ETF — 跟踪KOSPI</li>
+        <li>部分跨境ETF可间接配置韩国科技股</li>
+      </ul>
+      <p style="font-size:12px;margin-top:8px"><b>布局时机判断：</b></p>
+      <ul style="font-size:12px;margin-top:4px">
+        <li>DRAM/NAND价格拐点上行 → 存储周期反转</li>
+        <li>AI算力需求爆发 → HBM相关标的受益</li>
+        <li>三星/SK海力士资本开支增加 → 设备/材料供应商受益</li>
+        <li>韩国"企业价值提升计划"落地 → 低PB股修复</li>
+      </ul>
+      <div class="tip-box" style="margin-top:10px">
+        <b>A股映射策略：</b>关注三星/SK海力士供应链上的A股公司，
+        如兆易创新（存储芯片）、长电科技（封装）、北方华创（设备）。
+        韩国存储芯片涨价直接利好这些公司的业绩预期。
+      </div>
+    </div>
   </div>`;
 }
 
 function getGlobalMarketsContent() {
-  return `<div class="factor-grid">
+  return Promise.resolve(`<div class="factor-grid">
     <div class="factor-card" style="border-top:3px solid #ea3943">
       <h4>🇯🇵 日本股市（日经225/东证指数）</h4>
       <p><b>当前特点：</b>日本央行结束负利率，日元走势成关键变量</p>
@@ -122,11 +461,11 @@ function getGlobalMarketsContent() {
         <tr><td>全球齐跌</td><td>系统性风险</td><td class="down">A股难独善其身</td></tr>
       </table>
     </div>
-  </div>`;
+  </div>`);
 }
 
 function getUSMarketContent() {
-  return `<div class="factor-grid">
+  return Promise.resolve(`<div class="factor-grid">
     <div class="factor-card" style="border-top:3px solid #58a6ff">
       <h4>🇺🇸 美联储货币政策</h4>
       <p><b>加息周期：</b>美元走强，全球资金回流，新兴市场承压，A股外资流出</p>
@@ -173,11 +512,11 @@ function getUSMarketContent() {
         <tr><td>金融脱钩</td><td class="up">A股本土券商</td><td class="down">外资占比高标的</td></tr>
       </table>
     </div>
-  </div>`;
+  </div>`);
 }
 
 function getPolicyContent() {
-  return `<div class="factor-grid">
+  return Promise.resolve(`<div class="factor-grid">
     <div class="factor-card">
       <h4>产业政策</h4>
       <p>• 新能源：碳中和目标，光伏/风电/储能持续受益<br>
@@ -205,12 +544,12 @@ function getPolicyContent() {
       • 人民币汇率：贬值利好出口，升值利好进口<br>
       • RCEP/一带一路：拓展海外市场机遇</p>
     </div>
-  </div>`;
+  </div>`);
 }
 
 // 新增：政策对股市/股价影响分析与预测
 function getPolicyImpactContent() {
-  return `<div class="method-section">
+  return Promise.resolve(`<div class="method-section">
     <h3 style="color:#58a6ff">中国宏观政策出台对股市的影响分析框架</h3>
     <div class="tip-box" style="margin-bottom:16px">
       <b>核心逻辑：</b>政策→预期→资金→板块→个股。政策出台后市场反应分三阶段：
@@ -273,7 +612,7 @@ function getPolicyImpactContent() {
       </ul>
     </div>
   </div>
-  ${getPolicyStockImpactTable()}`;
+  ${getPolicyStockImpactTable()}`);
 }
 
 // 政策对具体个股的影响预测表
@@ -308,7 +647,7 @@ function getPolicyStockImpactTable() {
 }
 
 function getLinkageContent() {
-  return `<div class="method-section">
+  return Promise.resolve(`<div class="method-section">
     <h3>宏观因素与板块联动关系图</h3>
     <table class="data-table">
       <tr><th>宏观因素</th><th>利好板块</th><th>利空板块</th></tr>
@@ -335,5 +674,5 @@ function getLinkageContent() {
       <b>实战建议：</b>每天开盘前查看：①隔夜美股/纳指 ②日韩早盘表现 ③港股恒指/恒生科技开盘方向。
       三者共振向上→A股高开概率大，可择机进场。三者共振向下→防御为主，控制仓位。
     </div>
-  </div>`;
+  </div>`);
 }
