@@ -168,19 +168,20 @@ function buildMarketReportPrompt(indexData) {
   for (const [k, v] of Object.entries(idx)) {
     dataStr += `${v.name}：${v.value} (${v.pct > 0 ? '+' : ''}${v.pct}%)\n`;
   }
-  return `你是资深A股投研总监，请根据以下实时大盘数据生成今日分析报告：
+  return `你是资深A股投研总监，请根据以下实时大盘数据生成今日深度分析报告：
 
 ${dataStr}
 
 报告要求：
-1. 今日大盘走势总结（多空力量对比、量能变化）
-2. 技术面关键位分析（支撑位/压力位、均线状态）
-3. 资金面动向（北向资金流向判断、主力板块资金流向）
-4. 热点板块轮动分析（领涨/领跌板块、持续性判断）
-5. 明日走势预判（上涨/震荡/下跌概率评估）
-6. 操作建议（仓位建议、进攻/防御方向）
+1. 今日大盘走势总结（多空力量对比、量能变化、涨跌家数）
+2. 技术面关键位分析（支撑位/压力位、均线状态、MACD信号）
+3. 资金面动向（北向资金流向、主力板块资金流向、融资余额变化）
+4. 热点板块轮动分析（领涨/领跌板块、持续性判断、龙头股表现）
+5. 风险因素（利空事件、解禁潮、政策风险）
+6. 明日走势预判（上涨/震荡/下跌概率，给出具体理由）
+7. 操作建议（仓位建议、进攻/防御方向、具体板块推荐）
 
-格式要求：使用markdown格式，##分段，关键数据加粗，结论给出概率判断。限制1500字以内。`;
+格式要求：使用markdown格式，##分段，关键数据加粗，结论给出概率判断。限制2000字以内。`;
 }
 
 function buildWatchlistReportPrompt(watchlist, indexData) {
@@ -191,30 +192,35 @@ function buildWatchlistReportPrompt(watchlist, indexData) {
       marketStr += `${v.name}：${v.value} (${v.pct > 0 ? '+' : ''}${v.pct}%)\n`;
     }
   }
-  let stockStr = watchlist.map((s, i) =>
-    `${i+1}. ${s.name}(${s.code}) | 成本价:${s.addPrice || '未知'} | 目标价:${s.targetPrice || '未设'} | 止损价:${s.stopLoss || '未设'} | 添加原因:${s.reason || '无'}`
-  ).join('\n');
+  let stockStr = watchlist.map((s, i) => {
+    const pnl = s.addPrice && s.price ? (((parseFloat(s.price) - parseFloat(s.addPrice)) / parseFloat(s.addPrice)) * 100).toFixed(2) + '%' : '未知';
+    const methods = (s.methods || []).join('/') || '无';
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${s.price||'未知'} | 成本:${s.addPrice||'未知'} | 盈亏:${pnl} | 目标价:${s.targetPrice||'未设'} | 止损价:${s.stopLoss||'未设'} | 选股方法:${methods} | 买入理由:${s.reason||'无'}`;
+  }).join('\n');
 
-  return `你是资深A股投研总监，请对以下自选股组合进行今日体检分析：
+  return `你是资深A股投研总监，请对以下自选股组合进行今日深度体检分析：
 
-大盘环境：
+大盘环境（实时数据）：
 ${marketStr}
 
-自选股列表：
+自选股列表（含选股方法和盈亏状态）：
 ${stockStr}
 
-对每只股票分析：
-1. 当前技术面状态（趋势方向、关键均线位置）
-2. 资金面判断（主力进出方向）
-3. 风险评估（距止损位距离、潜在风险点）
-4. 操作建议（持有/加仓/减仓/清仓及理由）
+对每只股票必须分析：
+1. 当前技术面状态（趋势方向、关键均线位置、支撑/压力位）
+2. 资金面判断（主力进出方向、量能变化）
+3. 估值水平（PE/PB与行业对比）
+4. 风险评估（距止损位距离、潜在风险点、暴雷概率）
+5. 明确操作信号：买入/加仓/持有/减仓/清仓（必须给出明确信号，不能含糊）
+6. 具体操作价位：买入区间、目标价、止损价
 
 最后给出：
 - 组合整体健康度评分（1-100分）
-- 调仓建议（哪些该加、哪些该减）
-- 风险预警
+- 调仓建议（哪些该加仓、哪些该减仓、哪些该清仓，给出具体理由）
+- 风险预警（哪些股票有暴雷风险）
+- 今日操作策略（总仓位建议、攻防配比）
 
-格式：markdown，每只股票用##分段，最后用##组合总评。限制2000字以内。`;
+格式：markdown，每只股票用##分段，操作信号加粗标注。限制2500字以内。`;
 }
 
 async function callReportAI(apiKey, userPrompt) {

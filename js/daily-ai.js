@@ -9,6 +9,56 @@ function saveAIKey(k) {
   localStorage.setItem('ai_api_key', k);
 }
 
+// 获取自选股实时行情（批量）
+async function fetchWatchlistQuotes() {
+  const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
+  let watchlist = [];
+  try { watchlist = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+  if (!watchlist.length) return { list: [], quotes: {} };
+  const quotes = {};
+  // 并行拉取所有股票行情（带缓存）
+  const fetches = watchlist.map(async s => {
+    try {
+      const data = await fetchAStockQuote(s.code);
+      if (data) quotes[s.code] = data;
+    } catch(e) {}
+  });
+  await Promise.allSettled(fetches);
+  // 拉取资金流向
+  const capFetches = watchlist.map(async s => {
+    try {
+      const capData = await fetchEMCapitalFlow(s.code);
+      if (capData && capData.length) {
+        const latest = capData[capData.length - 1];
+        quotes[s.code] = quotes[s.code] || {};
+        quotes[s.code].capitalFlow = latest;
+        quotes[s.code].capitalTrend = capData.slice(-5);
+      }
+    } catch(e) {}
+  });
+  await Promise.allSettled(capFetches);
+  return { list: watchlist, quotes };
+}
+
+// 构建自选股分析数据摘要（注入Prompt）
+function buildWatchlistSummary(watchlist, quotes) {
+  if (!watchlist.length) return '';
+  return watchlist.map((s, i) => {
+    const q = quotes[s.code] || {};
+    const price = q.price || s.price || '—';
+    const pct = q.pct !== undefined ? (q.pct > 0 ? '+' : '') + q.pct + '%' : '未知';
+    const pe = q.pe || '—';
+    const cap = q.capitalFlow;
+    const capStr = cap ? `主力${cap.main > 0 ? '+' : ''}${cap.main.toFixed(2)}亿` : '资金数据未知';
+    const cost = s.addPrice || '未知';
+    const target = s.targetPrice || '未设';
+    const stop = s.stopLoss || '未设';
+    const pnl = s.addPrice ? (((parseFloat(price) - parseFloat(s.addPrice)) / parseFloat(s.addPrice)) * 100).toFixed(2) + '%' : '未知';
+    const methods = (s.methods || []).join('/') || '无';
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | 主力:${capStr} | 选股方法:${methods}`;
+  }).join('\n');
+}
+
 function renderDailyAI(el) {
   const today = new Date().toISOString().slice(0, 10);
   const cached = getDailyCache(today);
@@ -17,7 +67,7 @@ function renderDailyAI(el) {
   el.innerHTML = `
     <div class="card">
       <div class="card-title">🤖 每日智能分析</div>
-      <p style="color:#8b949e;font-size:13px">AI自动分析当日行情、国际局势、美股动态，推荐10只主线股票</p>
+      <p style="color:#8b949e;font-size:13px">AI自动分析大盘走势、自选股风险、买卖信号，推荐主线股票</p>
       <div style="margin-top:8px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px">
         <div style="font-size:12px;color:#8b949e;margin-bottom:6px">
           当前API Key：<span style="color:#58a6ff">${keyMask}</span>
@@ -28,14 +78,106 @@ function renderDailyAI(el) {
           <button class="btn btn-blue btn-sm" onclick="setAIKey()">保存Key</button>
         </div>
       </div>
-      <div style="margin-top:12px;display:flex;gap:10px">
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="generateDailyAnalysis()" id="aiBtn">生成今日分析</button>
         <button class="btn btn-blue" onclick="showFallbackNow()">查看离线示例</button>
         <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : (savedKey ? '点击按钮开始分析' : '未配置API Key，将显示离线分析')}</span>
       </div>
     </div>
+    <div id="marketOverviewArea"></div>
+    <div id="watchlistSignalArea"></div>
     <div id="dailyResult">${cached ? cached : ''}</div>
   `;
+  // 异步加载大盘概览和自选股信号（不影响主体渲染）
+  loadMarketOverview();
+  loadWatchlistSignals();
+}
+
+// 加载大盘实时概览
+async function loadMarketOverview() {
+  const area = document.getElementById('marketOverviewArea');
+  if (!area) return;
+  try {
+    const snapshot = await fetchMarketSnapshot();
+    if (!snapshot) { area.innerHTML = ''; return; }
+    const shCls = parseFloat(snapshot.sh.pct) >= 0 ? 'up' : 'down';
+    const szCls = parseFloat(snapshot.sz.pct) >= 0 ? 'up' : 'down';
+    const cybCls = parseFloat(snapshot.cyb.pct) >= 0 ? 'up' : 'down';
+    area.innerHTML = `<div class="card" style="border-left:3px solid #58a6ff">
+      <div class="card-title">📊 今日大盘实时概览</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+        <div style="flex:1;min-width:200px;padding:10px;background:#0d1117;border-radius:6px;border:1px solid #30363d">
+          <div style="font-size:12px;color:#8b949e">上证指数</div>
+          <div style="font-size:20px;font-weight:700;color:#e6e6e6">${snapshot.sh.price}</div>
+          <div class="${shCls}" style="font-size:14px;font-weight:600">${parseFloat(snapshot.sh.pct)>=0?'+':''}${snapshot.sh.pct}%</div>
+        </div>
+        <div style="flex:1;min-width:200px;padding:10px;background:#0d1117;border-radius:6px;border:1px solid #30363d">
+          <div style="font-size:12px;color:#8b949e">深证成指</div>
+          <div style="font-size:20px;font-weight:700;color:#e6e6e6">${snapshot.sz.price}</div>
+          <div class="${szCls}" style="font-size:14px;font-weight:600">${parseFloat(snapshot.sz.pct)>=0?'+':''}${snapshot.sz.pct}%</div>
+        </div>
+        <div style="flex:1;min-width:200px;padding:10px;background:#0d1117;border-radius:6px;border:1px solid #30363d">
+          <div style="font-size:12px;color:#8b949e">创业板指</div>
+          <div style="font-size:20px;font-weight:700;color:#e6e6e6">${snapshot.cyb.price}</div>
+          <div class="${cybCls}" style="font-size:14px;font-weight:600">${parseFloat(snapshot.cyb.pct)>=0?'+':''}${snapshot.cyb.pct}%</div>
+        </div>
+      </div>
+    </div>`;
+  } catch(e) { area.innerHTML = ''; }
+}
+
+// 加载自选股实时信号
+async function loadWatchlistSignals() {
+  const area = document.getElementById('watchlistSignalArea');
+  if (!area) return;
+  try {
+    const { list, quotes } = await fetchWatchlistQuotes();
+    if (!list.length) { area.innerHTML = ''; return; }
+    const marketCtx = await getMarketContext();
+    const evaluations = list.map(s => {
+      const q = quotes[s.code] || {};
+      const enrichedStock = { ...s, price: q.price || s.price };
+      const rtData = { capitalFlow: q.capitalFlow || null, turnover: q.volume || null };
+      const ev = evaluateWatchStock(enrichedStock, marketCtx, rtData);
+      return { stock: s, quote: q, evaluation: ev };
+    });
+    // 按风险排序：卖出>减仓>持有>买入
+    const order = { sell: 0, reduce: 1, hold: 2, buy: 3 };
+    evaluations.sort((a, b) => (order[a.evaluation.signal] || 2) - (order[b.evaluation.signal] || 2));
+    const sigMap = { sell: '🔴 清仓', reduce: '🟠 减仓', hold: '🟡 持有', buy: '🟢 买入' };
+    const sigCls = { sell: 'down', reduce: 'down', hold: 'flat', buy: 'up' };
+    const bgMap = { sell: '#2d0a0a', reduce: '#2d1f0a', hold: '#0d1117', buy: '#0a2d1a' };
+    area.innerHTML = `<div class="card" style="border-left:3px solid #f0883e">
+      <div class="card-title">⚡ 自选股实时信号（${list.length}只）</div>
+      <div style="font-size:12px;color:#8b949e;margin-bottom:8px">大盘环境：<span style="color:${marketCtx.color}">${marketCtx.desc}</span></div>
+      <div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
+        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>卖出分</th><th>买入分</th><th>主力资金</th><th>操作建议</th></tr>
+        ${evaluations.map(({stock:s, quote:q, evaluation:ev}) => {
+          const pct = q.pct !== undefined ? q.pct : '—';
+          const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
+          const cap = ev.capital || {};
+          const mainStr = cap.main || '—';
+          const mainCls = (typeof mainStr === 'string' && mainStr.startsWith('+')) ? 'up' : 'down';
+          return `<tr style="background:${bgMap[ev.signal] || '#0d1117'}">
+            <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div></td>
+            <td>${q.price || s.price || '—'}</td>
+            <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
+            <td class="${sigCls[ev.signal]||'flat'}" style="font-weight:700">${sigMap[ev.signal]||'持有'}</td>
+            <td class="down">${ev.sellScore}</td>
+            <td class="up">${ev.buyScore}</td>
+            <td class="${mainCls}">${mainStr}</td>
+            <td style="font-size:11px">${ev.tradeAction}</td>
+          </tr>`;
+        }).join('')}
+      </table></div>
+      <div class="tip-box" style="margin-top:8px;font-size:11px">
+        <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)
+      </div>
+    </div>`;
+  } catch(e) {
+    console.error('loadWatchlistSignals error', e);
+    area.innerHTML = '';
+  }
 }
 
 function setAIKey() {
@@ -77,11 +219,14 @@ async function generateDailyAnalysis() {
   result.innerHTML = '<div class="card"><p style="color:#58a6ff">正在调用AI分析引擎...</p></div>';
 
   const today = new Date().toLocaleDateString('zh-CN');
-  // 先拉取真实大盘数据注入 Prompt
-  status.textContent = '拉取实时大盘数据中...';
+  // 拉取大盘数据 + 自选股实时行情
+  status.textContent = '拉取实时大盘数据...';
   const marketSnapshot = await fetchMarketSnapshot();
-  status.textContent = 'AI分析中，请稍候（含真实大盘数据）...';
-  const prompt = buildDailyPrompt(today, marketSnapshot);
+  status.textContent = '拉取自选股实时行情...';
+  const { list: watchlist, quotes } = await fetchWatchlistQuotes();
+  const watchlistSummary = buildWatchlistSummary(watchlist, quotes);
+  status.textContent = 'AI深度分析中（含自选股+大盘数据）...';
+  const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary, watchlist.length);
 
   try {
     const res = await fetch(AI_API_URL, {
@@ -134,14 +279,15 @@ function getSystemPrompt() {
   return `你是资深A股投研总监，拥有20年实战经验，融合东方财富、同花顺、英为财情三家平台的分析框架。你的风格：
 1. 数据驱动，量化先行，每个判断必须有数据支撑，不讲空话
 2. 必须结合传入的真实大盘数据（上证/深证/创业板实时点位）做研判
-3. 分析框架：宏观周期定位→大盘技术面→资金面（北向/融资/主力）→行业轮动→个股精选
-4. 板块联动逻辑：美股AI→A股算力/半导体；油价→石化/军工；汇率→出口链；地产→银行/建材；降息→券商/成长
-5. 每次推荐恰好20只股票，必须给出：五星评级、买入理由(3条)、风险点(3条)、买入区间、目标价、止损价、持有周期
-6. 预测要有逻辑链：原因→推导→结论→概率，避免"可能上涨"这类空泛表述
-7. 风险评估要量化：下跌概率、最大回撤幅度、风险收益比
-8. 使用markdown格式，##标题分段，表格数据整齐
-9. 结尾给出"今日操作策略"（仓位配比+攻防方向）和"3条交易铁律"
-10. 免责声明：AI分析仅供参考，不构成投资建议`;
+3. 分析框架：宏观周期定位→大盘技术面→资金面→行业轮动→个股精选
+4. 板块联动逻辑：美股AI→A股算力/半导体；油价→石化/军工；汇率→出口链；降息→券商/成长
+5. 每次推荐恰好15只股票，给出：五星评级、买入理由、风险点、买入区间、目标价、止损价
+6. 预测要有逻辑链：原因→推导→结论→概率
+7. 风险评估要量化：下跌概率、最大回撤、风险收益比
+8. 使用markdown格式，##标题分段
+9. 结尾给出"今日操作策略"和"3条交易铁律"
+10. 如果传入了自选股列表，必须逐只分析，给出明确买入/卖出/持有信号和具体价位
+11. 免责声明：AI分析仅供参考，不构成投资建议`;
 }
 
 // 拉取实时大盘快照供 Prompt 使用
@@ -158,9 +304,11 @@ async function fetchMarketSnapshot() {
   } catch(e) { return null; }
 }
 
-function buildDailyPrompt(today, snapshot) {
-  const mkt = snapshot ? `\n## 实时大盘快照（作为分析基础）\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
-  return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告：${mkt}
+function buildDailyPrompt(today, snapshot, watchlistSummary, watchlistCount) {
+  const mkt = snapshot ? `\n## 实时大盘快照\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
+  const wl = watchlistSummary ? `\n## 自选股实时数据（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n要求：对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向）\n3. 风险评估（距止损位距离、潜在风险点）\n4. 明确操作信号：买入/加仓/持有/减仓/清仓\n5. 具体操作价位（买入区间、目标价、止损价）\n` : '';
+  return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告：
+${mkt}${wl}
 ## 一、宏观环境与周期定位
 - 当前处于经济周期的哪个阶段（复苏/过热/滞胀/衰退）
 - 货币政策方向（降准降息预期/流动性判断）
@@ -171,48 +319,26 @@ function buildDailyPrompt(today, snapshot) {
 - MACD（金叉/死叉/背离）、均线系统（多头/空头排列）
 - 关键支撑压力位（写清具体点位，精确到个位）
 - 市场情绪指标（涨跌家数比、涨停跌停数、连板高度）
-- 北向资金今日预估流向及近5日趋势
 - 大盘短期走势预判（上涨/震荡/下跌概率各多少）
 
 ## 三、国际市场传导分析
-- 昨夜美股（道琼斯/纳指/标普）走势及原因
-- 大宗商品（原油/黄金/铜/美元指数）对A股板块的映射
-- 地缘政治（中美/俄乌/中东）对军工、能源、供应链的影响
-- 全球央行政策动向对A股资金面的影响
+- 昨夜美股走势及原因
+- 大宗商品对A股板块的映射
+- 地缘政治对军工、能源、供应链的影响
 
 ## 四、行业轮动与板块联动
 明确指出3-5条最强主线板块，每条写明：
-- 主线逻辑（为什么这个板块现在强）
-- 催化事件（什么触发了行情）
-- 核心龙头（1-2只，必须给代码）
-- 跟涨标的（2-3只补涨机会）
-- 板块持续性判断（短炒1-3天 / 中线1-2周 / 长线趋势）
+- 主线逻辑、催化事件、核心龙头（给代码）、跟涨标的
+- 板块持续性判断（短炒/中线/长线）
 
-## 五、今日推荐20只股票（机构级评级）
-以表格列出，必须包含全部字段：
-| 序号 | 代码 | 名称 | 主线 | 五星评级 | 买入理由(3条) | 风险点(3条) | 换手率 | 主力资金 | 财务风险 | 趋势 | 买入区间 | 目标价 | 止损价 | 持有周期 |
-
-要求：
-- 恰好20只A股，代码规范（如sh600519）
-- 五星评级：★★★★★强烈推荐/★★★★推荐/★★★观望/★★不建议/★回避
-- 高估值(PE>行业均值50%)、下跌通道、主力撤退的股票明确标注"回避"或"观望"
-- 每只必须写清风险点，让用户理性决策
-- 风险收益比必须>2:1才给"推荐"以上评级
+## 五、今日推荐15只股票（机构级评级）
+| 序号 | 代码 | 名称 | 主线 | 五星评级 | 买入理由 | 风险点 | 主力资金 | 趋势 | 买入区间 | 目标价 | 止损价 |
+要求：恰好15只A股，代码规范，高估值/下跌通道/主力撤退的标注"回避"
 
 ## 六、风险事件日历
-列出未来一周可能影响市场的关键事件（经济数据发布、政策会议、解禁潮等）
-
-## 七、今日操作策略
-- 总仓位建议：XX%（满仓/8成/半仓/3成/空仓观望）
-- 攻防配比：进攻XX% + 防御XX%
-- 进攻方向：具体板块和逻辑
-- 防御品种：具体标的
-
+## 七、今日操作策略（仓位+攻防方向）
 ## 八、3条交易铁律
-针对当前大盘环境，给出3条今日必须遵守的交易纪律
-
-## 九、免责声明
-本分析由AI生成，仅供参考，不构成投资建议，股市有风险入市需谨慎`;
+## 九、免责声明`;
 }
 
 // 将AI的markdown输出转为HTML
