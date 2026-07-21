@@ -50,12 +50,22 @@ function buildWatchlistSummary(watchlist, quotes) {
     const pe = q.pe || '—';
     const cap = q.capitalFlow;
     const capStr = cap ? `主力${cap.main > 0 ? '+' : ''}${cap.main.toFixed(2)}亿` : '资金数据未知';
+    // 散户资金流向
+    const trend = q.capitalTrend || [];
+    let retailStr = '散户数据未知';
+    if (trend.length >= 2) {
+      const recentSmall = trend.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
+      retailStr = recentSmall > 0 ? `散户净流入${recentSmall.toFixed(2)}亿` : `散户净流出${Math.abs(recentSmall).toFixed(2)}亿`;
+    } else if (trend.length === 1) {
+      const small = trend[0].small || 0;
+      retailStr = small > 0 ? `散户流入${small.toFixed(2)}亿` : `散户流出${Math.abs(small).toFixed(2)}亿`;
+    }
     const cost = s.addPrice || '未知';
     const target = s.targetPrice || '未设';
     const stop = s.stopLoss || '未设';
     const pnl = s.addPrice ? (((parseFloat(price) - parseFloat(s.addPrice)) / parseFloat(s.addPrice)) * 100).toFixed(2) + '%' : '未知';
     const methods = (s.methods || []).join('/') || '无';
-    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | 主力:${capStr} | 选股方法:${methods}`;
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | 选股方法:${methods}`;
   }).join('\n');
 }
 
@@ -151,27 +161,43 @@ async function loadWatchlistSignals() {
       <div class="card-title">⚡ 自选股实时信号（${list.length}只）</div>
       <div style="font-size:12px;color:#8b949e;margin-bottom:8px">大盘环境：<span style="color:${marketCtx.color}">${marketCtx.desc}</span></div>
       <div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
-        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>卖出分</th><th>买入分</th><th>主力资金</th><th>操作建议</th></tr>
+        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>主力资金</th><th>散户动向</th><th>操作建议</th></tr>
         ${evaluations.map(({stock:s, quote:q, evaluation:ev}) => {
           const pct = q.pct !== undefined ? q.pct : '—';
           const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
           const cap = ev.capital || {};
           const mainStr = cap.main || '—';
           const mainCls = (typeof mainStr === 'string' && mainStr.startsWith('+')) ? 'up' : 'down';
+          // 计算散户动向（近5日小单资金流）
+          const trend = q.capitalTrend || [];
+          let retailStr = '—', retailCls = 'flat', retailIcon = '';
+          if (trend.length >= 2) {
+            const recentSmall = trend.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
+            const earlierSmall = trend.slice(-5, -2).reduce((sum, t) => sum + (t.small || 0), 0);
+            const retailFlow = recentSmall.toFixed(2);
+            if (recentSmall > 0.3) { retailStr = `流入${retailFlow}亿`; retailCls = 'up'; retailIcon = '📈'; }
+            else if (recentSmall < -0.3) { retailStr = `流出${Math.abs(retailFlow)}亿`; retailCls = 'down'; retailIcon = '📉'; }
+            else { retailStr = `净额${retailFlow}亿`; retailCls = 'flat'; retailIcon = '➡️'; }
+          } else if (trend.length === 1) {
+            const small = trend[0].small || 0;
+            retailStr = small > 0 ? `流入${small.toFixed(2)}亿` : `流出${Math.abs(small).toFixed(2)}亿`;
+            retailCls = small > 0 ? 'up' : small < 0 ? 'down' : 'flat';
+            retailIcon = small > 0 ? '📈' : small < 0 ? '📉' : '➡️';
+          }
           return `<tr style="background:${bgMap[ev.signal] || '#0d1117'}">
             <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div></td>
             <td>${q.price || s.price || '—'}</td>
             <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
             <td class="${sigCls[ev.signal]||'flat'}" style="font-weight:700">${sigMap[ev.signal]||'持有'}</td>
-            <td class="down">${ev.sellScore}</td>
-            <td class="up">${ev.buyScore}</td>
             <td class="${mainCls}">${mainStr}</td>
+            <td class="${retailCls}">${retailIcon} ${retailStr}</td>
             <td style="font-size:11px">${ev.tradeAction}</td>
           </tr>`;
         }).join('')}
       </table></div>
       <div class="tip-box" style="margin-top:8px;font-size:11px">
-        <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)
+        <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)<br>
+        <b>散户动向：</b>📈散户买入(近3日小单净流入) | 📉散户卖出(近3日小单净流出) | ➡️散户观望
       </div>
     </div>`;
   } catch(e) {
