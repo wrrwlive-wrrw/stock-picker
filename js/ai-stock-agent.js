@@ -7,12 +7,15 @@ function renderAIAgent(el) {
   el.innerHTML = `
     <div class="card">
       <div class="card-title">🧠 AI选股智能体</div>
-      <p style="color:#8b949e;font-size:13px">输入股票代码，AI将从技术面、基本面、资金面、消息面、行业对比五大维度进行全面深度分析，给出风险预警和买卖建议。</p>
+      <p style="color:#8b949e;font-size:13px">输入股票代码或名称，AI将从技术面、基本面、资金面、消息面、行业对比五大维度进行全面深度分析，给出风险预警和买卖建议。</p>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input type="text" id="aiAgentCode" placeholder="股票代码 如 sh600519" style="width:160px;padding:8px;background:#0d1117;border:1px solid #30363d;color:#e6e6e6;border-radius:4px">
         <input type="text" id="aiAgentName" placeholder="名称(可选)" style="width:120px;padding:8px;background:#0d1117;border:1px solid #30363d;color:#e6e6e6;border-radius:4px">
         <button class="btn btn-primary" onclick="startAIAnalysis()" id="aiAgentBtn">开始深度分析</button>
         <span style="font-size:12px;color:#8b949e" id="aiAgentStatus">${savedKey ? '输入代码后点击分析' : '请先在每日分析页配置API Key'}</span>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#8b949e">
+        💡 支持输入：纯数字(600519)、带前缀(sh600519)、股票名称(贵州茅台)
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sh600519','贵州茅台')">茅台</button>
@@ -21,6 +24,8 @@ function renderAIAgent(el) {
         <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sh688981','中芯国际')">中芯国际</button>
         <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sz000333','美的集团')">美的集团</button>
         <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sh601012','隆基绿能')">隆基绿能</button>
+        <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sh600036','招商银行')">招商银行</button>
+        <button class="btn btn-sm" style="background:#21262d;color:#8b949e" onclick="quickAIAnalysis('sz000858','五粮液')">五粮液</button>
       </div>
     </div>
     <div id="aiAgentResult"></div>
@@ -33,11 +38,48 @@ function quickAIAnalysis(code, name) {
   startAIAnalysis();
 }
 
+// 自动修正股票代码格式
+function normalizeStockCode(input) {
+  let code = input.trim();
+  // 如果是纯数字，自动补前缀
+  if (/^\d{6}$/.test(code)) {
+    if (code.startsWith('6')) code = 'sh' + code;
+    else if (code.startsWith('0') || code.startsWith('3')) code = 'sz' + code;
+    else if (code.startsWith('68')) code = 'sh' + code;
+    else code = 'sh' + code; // 默认上交所
+  }
+  // 确保小写
+  code = code.toLowerCase();
+  return code;
+}
+
+// 常见股票代码映射（名称→代码）
+const STOCK_NAME_MAP = {
+  '贵州茅台':'sh600519','茅台':'sh600519','宁德时代':'sz300750','比亚迪':'sz002594',
+  '中芯国际':'sh688981','美的集团':'sz000333','美的':'sz000333','隆基绿能':'sh601012',
+  '隆基':'sh601012','北方华创':'sz002371','韦尔股份':'sh603501','招商银行':'sh600036',
+  '五粮液':'sz000858','中国平安':'sh601318','恒瑞医药':'sh600276','迈瑞医疗':'sz300760',
+  '东方财富':'sz300059','立讯精密':'sz002475','海康威视':'sz002415','药明康德':'sh603259',
+  '中信证券':'sh600030','比亚迪股份':'sz002594','阳光电源':'sz300274','通威股份':'sh600438',
+  '长江电力':'sh600900','中国神华':'sh601088','紫金矿业':'sh601899','格力电器':'sz000651',
+  '万科':'sz000002','万科A':'sz000002','中航沈飞':'sh600760','航发动力':'sh600893',
+  '浪潮信息':'sz000977','金山办公':'sh688111','中际旭创':'sz300308','工业富联':'sh601138'
+};
+
 // 主分析流程
 async function startAIAnalysis() {
-  const code = document.getElementById('aiAgentCode').value.trim();
-  const name = document.getElementById('aiAgentName').value.trim();
-  if (!code) { alert('请输入股票代码'); return; }
+  let code = document.getElementById('aiAgentCode').value.trim();
+  let name = document.getElementById('aiAgentName').value.trim();
+  if (!code && !name) { alert('请输入股票代码或名称'); return; }
+
+  // 如果输入的是名称，自动查代码
+  if (name && !code) {
+    const mapped = STOCK_NAME_MAP[name];
+    if (mapped) { code = mapped; }
+    else { alert('未识别的股票名称"' + name + '"，请直接输入代码如 sh600519'); return; }
+  }
+  // 自动修正代码格式
+  code = normalizeStockCode(code);
 
   const apiKey = getAIKey();
   if (!apiKey) { alert('请先在"每日分析"页面配置API Key'); return; }
@@ -46,16 +88,33 @@ async function startAIAnalysis() {
   const status = document.getElementById('aiAgentStatus');
   const result = document.getElementById('aiAgentResult');
   btn.disabled = true;
-  status.textContent = '正在获取实时行情数据...';
+  status.textContent = '正在验证股票代码并获取实时行情...';
   result.innerHTML = '<div class="card"><p style="color:#58a6ff">AI智能体启动中...</p></div>';
 
-  // 第一步：获取实时行情
+  // 第一步：获取实时行情并验证
   let quoteData = null;
   try {
     if (typeof fetchAStockQuote === 'function') {
       quoteData = await fetchAStockQuote(code);
     }
   } catch(e) { console.warn('获取行情失败', e); }
+
+  if (!quoteData) {
+    result.innerHTML = `<div class="card" style="border-color:#da3633">
+      <div class="card-title" style="color:#ea3943">⚠️ 无法识别该股票</div>
+      <p style="color:#ea3943;font-size:13px">代码"${code}"未找到对应股票数据</p>
+      <p style="color:#8b949e;font-size:12px;margin-top:8px">
+        请检查：1)代码是否正确 2)是否需要添加前缀(sh/sz) 3)如输入名称请确认是否为常见简称
+      </p>
+    </div>`;
+    btn.disabled = false;
+    status.textContent = '股票代码验证失败';
+    return;
+  }
+
+  // 用API返回的真实名称更新name
+  if (quoteData.name && !name) name = quoteData.name;
+  status.textContent = `${quoteData.name}(${code}) 行情获取成功，AI分析中...`;
 
   // 第二步：获取资金流向
   let capitalData = null;

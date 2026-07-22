@@ -143,14 +143,15 @@ function renderWatchlist(el) {
     </div>
     <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据...</p></div></div>
     ${alertsHtml}
-    <div class="card">
-      <div class="card-title">持仓明细 & 主力资金动向</div>
+    <div id="watchlistTableCard" class="card">
+      <div class="card-title">持仓明细 & 实时数据</div>
       ${tableHtml}
     </div>
   `;
 
-  // 异步加载每日体检（不影响主体渲染）
+  // 异步加载每日体检 + 实时行情
   loadDailyReport(list);
+  refreshWatchlistRealTime();
 }
 
 async function loadDailyReport(list) {
@@ -174,25 +175,93 @@ function renderWatchTable(list) {
   return renderWatchTableWithCapital(list);
 }
 
-// 模拟主力资金数据
+// 保留旧函数兼容（trade-signal.js调用），但返回空数据让真实数据覆盖
 function getCapitalData(code) {
-  const data = {
-    'sh600519': {main:'+4.1亿',days3:'+12.5亿',days5:'+15.6亿',trend:'持续流入',risk:'low'},
-    'sz300750': {main:'+1.8亿',days3:'+4.2亿',days5:'+6.5亿',trend:'持续流入',risk:'low'},
-    'sz002594': {main:'+2.3亿',days3:'+5.8亿',days5:'+8.9亿',trend:'加速流入',risk:'low'},
-    'sh601012': {main:'-0.5亿',days3:'-2.1亿',days5:'-3.8亿',trend:'持续流出',risk:'high'},
-    'sh688981': {main:'+3.5亿',days3:'+8.6亿',days5:'+12.3亿',trend:'大幅流入',risk:'low'},
-    'sz002371': {main:'+2.6亿',days3:'+6.2亿',days5:'+9.8亿',trend:'持续流入',risk:'low'},
-    'sh603501': {main:'-1.2亿',days3:'-2.8亿',days5:'-1.5亿',trend:'近期流出',risk:'medium'},
-    'sz000333': {main:'+0.9亿',days3:'+1.5亿',days5:'+2.1亿',trend:'温和流入',risk:'low'},
-  };
-  return data[code] || {main:getRandCapital(),days3:getRandCapital(),days5:getRandCapital(),trend:'数据更新中',risk:Math.random()>0.7?'high':'low'};
+  return {main:'0亿',days3:'0亿',days5:'0亿',trend:'加载中',risk:'low'};
 }
 
-function getRandCapital() {
-  const v = (Math.random()*4-1.5).toFixed(1);
-  const num = parseFloat(v);
-  return (num>=0?'+':'')+v+'亿';
+// 异步拉取全部自选股实时行情+资金流，刷新表格显示
+async function refreshWatchlistRealTime() {
+  const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+  list = list.filter(s => s && s.code && s.name);
+  if (currentMethodFilter) list = list.filter(s => (s.methods || []).includes(currentMethodFilter));
+  if (!list.length) return;
+  const results = {};
+  const fetches = list.map(async s => {
+    try {
+      const [quote, capFlow] = await Promise.all([
+        fetchAStockQuote(s.code).catch(() => null),
+        fetchEMCapitalFlow(s.code).catch(() => null)
+      ]);
+      results[s.code] = { quote, capFlow };
+    } catch(e) {}
+  });
+  await Promise.allSettled(fetches);
+  const tableCard = document.getElementById('watchlistTableCard');
+  if (tableCard) {
+    tableCard.innerHTML = renderWatchTableRealTime(list, results);
+  }
+}
+
+// 使用真实数据渲染表格
+function renderWatchTableRealTime(list, results) {
+  return `<div style="overflow-x:auto"><table class="data-table">
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌</th><th>成本</th><th>盈亏</th><th>目标价</th><th>止损价</th><th>主力资金</th><th>散户动向</th><th>状态</th><th>操作</th></tr>
+    ${list.map(s => {
+      const r = results[s.code] || {};
+      const q = r.quote || {};
+      const capFlow = r.capFlow;
+      const cur = parseFloat(q.price) || parseFloat(s.price) || 0;
+      const add = parseFloat(s.addPrice) || cur;
+      const tp = parseFloat(s.targetPrice) || 0;
+      const sl = parseFloat(s.stopLoss) || 0;
+      const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
+      const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
+      const pct = q.pct !== undefined ? q.pct : 0;
+      const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
+      let mainStr = '—', mainCls = 'flat';
+      if (capFlow && capFlow.length) {
+        const latest = capFlow[capFlow.length - 1];
+        mainStr = (latest.main > 0 ? '+' : '') + latest.main.toFixed(2) + '亿';
+        mainCls = latest.main >= 0 ? 'up' : 'down';
+      }
+      let retailStr = '—', retailCls = 'flat', retailIcon = '';
+      if (capFlow && capFlow.length >= 2) {
+        const recentSmall = capFlow.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
+        if (recentSmall > 0.3) { retailStr = '流入' + recentSmall.toFixed(2) + '亿'; retailCls = 'up'; retailIcon = '📈'; }
+        else if (recentSmall < -0.3) { retailStr = '流出' + Math.abs(recentSmall).toFixed(2) + '亿'; retailCls = 'down'; retailIcon = '📉'; }
+        else { retailStr = '净额' + recentSmall.toFixed(2) + '亿'; retailCls = 'flat'; retailIcon = '➡️'; }
+      }
+      let stopDist = '—', stopCls = 'flat', statusTag = '<span class="factor-tag tag-positive">安全</span>';
+      if (sl > 0 && cur > 0) {
+        const dist = ((cur - sl) / sl * 100).toFixed(1);
+        stopDist = dist + '%';
+        stopCls = dist < 3 ? 'down' : dist < 8 ? 'flat' : 'up';
+        if (cur <= sl) statusTag = '<span class="factor-tag tag-negative">已破止损</span>';
+        else if (dist < 3) statusTag = '<span class="factor-tag tag-negative">危险</span>';
+        else if (dist < 8) statusTag = '<span class="factor-tag tag-neutral">警戒</span>';
+      }
+      return `<tr>
+        <td>${s.code||''}</td>
+        <td><b>${s.name||''}</b>${renderMethodTags(s.methods)}</td>
+        <td>${cur || '—'}</td>
+        <td class="${pctCls}">${pct ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
+        <td>${s.addPrice || '—'}</td>
+        <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
+        <td class="up">${tp || '—'}</td>
+        <td class="down">${sl || '—'}</td>
+        <td class="${mainCls}">${mainStr}</td>
+        <td class="${retailCls}">${retailIcon} ${retailStr}</td>
+        <td>${statusTag}</td>
+        <td>
+          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button>
+        </td>
+      </tr>`;
+    }).join('')}
+  </table></div>`;
 }
 
 // 选股方法颜色映射
@@ -215,50 +284,12 @@ function renderMethodTags(methods) {
   </div>`;
 }
 
-// 带主力资金的表格
+// 带主力资金的表格（初始渲染显示加载中，异步替换为真实数据）
 function renderWatchTableWithCapital(list) {
-  return `<div style="overflow-x:auto"><table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>成本</th><th>盈亏</th><th>目标价</th><th>止损价</th><th>距止损</th><th>今日主力</th><th>5日累计</th><th>状态</th><th>操作</th></tr>
-    ${list.map(s => {
-      const cur = parseFloat(s.price) || 0;
-      const add = parseFloat(s.addPrice) || cur;
-      const tp = parseFloat(s.targetPrice) || 0;
-      const sl = parseFloat(s.stopLoss) || 0;
-      const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
-      const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
-      const cap = getCapitalData(s.code);
-      const mainStr = cap.main || '+0亿';
-      const days5Str = cap.days5 || '+0亿';
-      const mainCls = mainStr.startsWith('+') ? 'up' : 'down';
-      let stopDist = '—', stopCls = 'flat', statusTag = '<span class="factor-tag tag-positive">安全</span>';
-      if (sl > 0 && cur > 0) {
-        const dist = ((cur - sl) / sl * 100).toFixed(1);
-        stopDist = dist + '%';
-        stopCls = dist < 3 ? 'down' : dist < 8 ? 'flat' : 'up';
-        if (cur <= sl) statusTag = '<span class="factor-tag tag-negative">已破止损</span>';
-        else if (dist < 3) statusTag = '<span class="factor-tag tag-negative">危险</span>';
-        else if (dist < 8) statusTag = '<span class="factor-tag tag-neutral">警戒</span>';
-      } else if (cap.risk === 'high') statusTag = '<span class="factor-tag tag-negative">警告</span>';
-      else if (cap.risk === 'medium') statusTag = '<span class="factor-tag tag-neutral">注意</span>';
-      return `<tr>
-        <td>${s.code||''}</td>
-        <td><b>${s.name||''}</b>${renderMethodTags(s.methods)}</td>
-        <td>${s.price||'—'}</td>
-        <td>${s.addPrice || '—'}</td>
-        <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
-        <td class="up">${tp || '—'}</td>
-        <td class="down">${sl || '—'}</td>
-        <td class="${stopCls}">${stopDist}</td>
-        <td class="${mainCls}">${mainStr}</td>
-        <td class="${days5Str.startsWith('+')?'up':'down'}">${days5Str}</td>
-        <td>${statusTag}</td>
-        <td>
-          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
-          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button>
-        </td>
-      </tr>`;
-    }).join('')}
-  </table></div>`;
+  return `<div style="text-align:center;padding:20px;color:#58a6ff">
+    <p>正在加载实时行情和资金流数据...</p>
+    <div style="margin-top:8px;font-size:12px;color:#8b949e">共${list.length}只自选股，正在并行拉取行情+资金流</div>
+  </div>`;
 }
 
 // 风险提醒（主力撤退警告）
