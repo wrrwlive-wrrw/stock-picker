@@ -24,12 +24,50 @@ const SAMPLE_INDEX = {
   spx: { name:'标普500', value:5823.45, change:15.67, pct:0.27 }
 };
 
-// A股个股示例数据
+// A股个股示例数据（扩展覆盖主流股票，API不可用时兜底）
 const SAMPLE_STOCKS = {
   sh600519: { name:'贵州茅台', price:1756.00, change:12.50, pct:0.72, pe:28.5, pb:9.2, volume:'2.3万手' },
   sz000858: { name:'五粮液', price:145.60, change:-1.20, pct:-0.82, pe:22.1, pb:5.8, volume:'4.1万手' },
   sh601318: { name:'中国平安', price:52.30, change:0.80, pct:1.55, pe:8.9, pb:1.2, volume:'8.5万手' },
-  sz300750: { name:'宁德时代', price:218.50, change:5.60, pct:2.63, pe:35.2, pb:6.1, volume:'5.2万手' }
+  sz300750: { name:'宁德时代', price:218.50, change:5.60, pct:2.63, pe:35.2, pb:6.1, volume:'5.2万手' },
+  sh600036: { name:'招商银行', price:35.80, change:0.45, pct:1.27, pe:6.8, pb:1.1, volume:'12.1万手' },
+  sz002594: { name:'比亚迪', price:268.50, change:8.30, pct:3.19, pe:22.5, pb:5.3, volume:'6.8万手' },
+  sh601012: { name:'隆基绿能', price:18.25, change:-0.65, pct:-3.44, pe:12.3, pb:1.8, volume:'15.2万手' },
+  sz000333: { name:'美的集团', price:62.80, change:1.20, pct:1.95, pe:13.2, pb:4.1, volume:'7.5万手' },
+  sh688981: { name:'中芯国际', price:52.60, change:2.10, pct:4.16, pe:45.2, pb:2.8, volume:'8.9万手' },
+  sz002371: { name:'北方华创', price:338.50, change:12.80, pct:3.92, pe:52.1, pb:8.5, volume:'3.2万手' },
+  sh603501: { name:'韦尔股份', price:88.50, change:-2.30, pct:-2.53, pe:35.6, pb:4.2, volume:'5.1万手' },
+  sh600030: { name:'中信证券', price:22.80, change:0.35, pct:1.56, pe:15.8, pb:1.3, volume:'18.5万手' },
+  sh600276: { name:'恒瑞医药', price:42.50, change:0.85, pct:2.04, pe:55.2, pb:8.9, volume:'6.2万手' },
+  sz300760: { name:'迈瑞医疗', price:285.00, change:5.50, pct:1.97, pe:38.5, pb:12.1, volume:'2.1万手' },
+  sz300059: { name:'东方财富', price:16.80, change:0.25, pct:1.51, pe:28.3, pb:4.5, volume:'22.3万手' },
+  sz002475: { name:'立讯精密', price:32.50, change:0.80, pct:2.52, pe:25.6, pb:5.2, volume:'9.8万手' },
+  sz002415: { name:'海康威视', price:28.90, change:-0.45, pct:-1.53, pe:18.5, pb:4.8, volume:'11.2万手' },
+  sh603259: { name:'药明康德', price:48.20, change:1.10, pct:2.34, pe:18.9, pb:3.5, volume:'7.8万手' },
+  sh600900: { name:'长江电力', price:28.50, change:0.15, pct:0.53, pe:18.2, pb:3.2, volume:'8.5万手' },
+  sh601088: { name:'中国神华', price:35.20, change:0.60, pct:1.73, pe:9.5, pb:1.6, volume:'10.2万手' },
+  sh601899: { name:'紫金矿业', price:16.80, change:0.35, pct:2.13, pe:12.8, pb:3.5, volume:'18.5万手' },
+  sz000651: { name:'格力电器', price:38.50, change:0.45, pct:1.18, pe:8.5, pb:2.8, volume:'9.2万手' },
+  sz000002: { name:'万科A', price:8.50, change:-0.25, pct:-2.86, pe:-5.2, pb:0.5, volume:'25.3万手' },
+  sh600760: { name:'中航沈飞', price:48.50, change:1.80, pct:3.85, pe:62.5, pb:6.8, volume:'5.5万手' },
+  sh600893: { name:'航发动力', price:38.20, change:0.95, pct:2.55, pe:85.2, pb:4.5, volume:'6.8万手' },
+  sz000977: { name:'浪潮信息', price:28.50, change:1.20, pct:4.40, pe:32.5, pb:5.8, volume:'12.5万手' },
+  sh688111: { name:'金山办公', price:285.00, change:8.50, pct:3.07, pe:85.2, pb:15.6, volume:'1.8万手' },
+  sz300308: { name:'中际旭创', price:88.50, change:3.20, pct:3.75, pe:28.5, pb:6.2, volume:'8.5万手' },
+  sh601138: { name:'工业富联', price:18.50, change:0.45, pct:2.49, pe:18.5, pb:3.2, volume:'15.8万手' },
+  sh600585: { name:'海螺水泥', price:25.80, change:0.35, pct:1.37, pe:7.5, pb:0.9, volume:'8.2万手' },
+  sh601857: { name:'中国石油', price:8.50, change:0.15, pct:1.80, pe:8.2, pb:0.8, volume:'22.5万手' },
+  sh600028: { name:'中国石化', price:5.80, change:0.10, pct:1.75, pe:7.5, pb:0.6, volume:'18.8万手' },
+  sh601288: { name:'农业银行', price:3.85, change:0.05, pct:1.32, pe:5.2, pb:0.6, volume:'35.2万手' },
+  sh601398: { name:'工商银行', price:5.80, change:0.08, pct:1.40, pe:5.5, pb:0.6, volume:'28.5万手' },
+  sh600016: { name:'民生银行', price:4.20, change:0.05, pct:1.20, pe:4.2, pb:0.4, volume:'15.8万手' },
+  sh601166: { name:'兴业银行', price:18.50, change:0.25, pct:1.37, pe:5.2, pb:0.6, volume:'12.5万手' },
+  sz000001: { name:'平安银行', price:12.50, change:0.15, pct:1.21, pe:5.8, pb:0.6, volume:'18.2万手' },
+  sh600809: { name:'山西汾酒', price:198.50, change:5.50, pct:2.85, pe:35.2, pb:12.5, volume:'2.5万手' },
+  sz000568: { name:'泸州老窖', price:158.00, change:3.80, pct:2.46, pe:22.5, pb:8.5, volume:'3.2万手' },
+  sh600887: { name:'伊利股份', price:28.50, change:0.45, pct:1.60, pe:18.5, pb:5.2, volume:'8.8万手' },
+  sz002714: { name:'牧原股份', price:42.50, change:1.20, pct:2.91, pe:-12.5, pb:4.8, volume:'7.5万手' },
+  sh600519: { name:'贵州茅台', price:1756.00, change:12.50, pct:0.72, pe:28.5, pb:9.2, volume:'2.3万手' }
 };
 
 // 获取A股实时数据（腾讯接口）
@@ -150,4 +188,36 @@ async function fetchEMCapitalFlow(code) {
     }
   } catch(e) { console.warn('资金流向API失败', e); }
   return null;
+}
+
+// 腾讯智能搜索API - 根据关键词模糊匹配股票
+// 返回格式：[{code:'sh600519', name:'贵州茅台'}, ...]
+async function searchStockByKeyword(keyword) {
+  if (!keyword || keyword.length < 1) return [];
+  const cacheKey = 'search_' + keyword;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+  try {
+    const searchUrl = 'http://smartbox.gtimg.cn/s3/?v=2&q=' + encodeURIComponent(keyword) + '&t=gp';
+    const url = `${CORS_PROXY}${encodeURIComponent(searchUrl)}`;
+    const res = await fetch(url);
+    const text = await res.text();
+    // 格式: v_hint="GP~code~name~..."
+    const match = text.match(/v_hint="(.+)"/);
+    if (!match || !match[1]) return [];
+    const items = match[1].split('^');
+    const results = [];
+    items.forEach(item => {
+      const parts = item.split('~');
+      // parts[0]=类型, parts[1]=市场(sh/sz), parts[2]=代码, parts[3]=名称, parts[4]=简拼
+      if (parts.length >= 3 && (parts[1] === 'sh' || parts[1] === 'sz')) {
+        results.push({ code: parts[1] + parts[2], name: parts[3] || parts[2] });
+      }
+    });
+    if (results.length > 0) setCache(cacheKey, results);
+    return results;
+  } catch(e) {
+    console.warn('腾讯搜索API失败', e);
+    return [];
+  }
 }
