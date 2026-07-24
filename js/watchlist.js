@@ -195,20 +195,24 @@ async function refreshWatchlistRealTime() {
         fetchAStockQuote(s.code).catch(() => null),
         fetchEMCapitalFlow(s.code).catch(() => null)
       ]);
-      results[s.code] = { quote, capFlow };
-    } catch(e) {}
+      // API失败时用SAMPLE_STOCKS兜底
+      const finalQuote = quote || SAMPLE_STOCKS[s.code] || null;
+      results[s.code] = { quote: finalQuote, capFlow };
+    } catch(e) {
+      results[s.code] = { quote: SAMPLE_STOCKS[s.code] || null, capFlow: null };
+    }
   });
   await Promise.allSettled(fetches);
   const tableCard = document.getElementById('watchlistTableCard');
   if (tableCard) {
-    tableCard.innerHTML = renderWatchTableRealTime(list, results);
+    tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);
   }
 }
 
-// 使用真实数据渲染表格
+// 使用真实数据渲染表格（股票名称可点击查看详情）
 function renderWatchTableRealTime(list, results) {
   return `<div style="overflow-x:auto"><table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌</th><th>成本</th><th>盈亏</th><th>目标价</th><th>止损价</th><th>主力资金</th><th>散户动向</th><th>状态</th><th>操作</th></tr>
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成交额</th><th>主力资金</th><th>散户动向</th><th>PE</th><th>状态</th><th>操作</th></tr>
     ${list.map(s => {
       const r = results[s.code] || {};
       const q = r.quote || {};
@@ -217,10 +221,10 @@ function renderWatchTableRealTime(list, results) {
       const add = parseFloat(s.addPrice) || cur;
       const tp = parseFloat(s.targetPrice) || 0;
       const sl = parseFloat(s.stopLoss) || 0;
-      const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
-      const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
-      const pct = q.pct !== undefined ? q.pct : 0;
-      const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
+      const pct = q.pct !== undefined ? parseFloat(q.pct) : 0;
+      const pctCls = pct >= 0 ? 'up' : 'down';
+      const volume = q.volume || '—';
+      const pe = q.pe || '—';
       let mainStr = '—', mainCls = 'flat';
       if (capFlow && capFlow.length) {
         const latest = capFlow[capFlow.length - 1];
@@ -243,25 +247,26 @@ function renderWatchTableRealTime(list, results) {
         else if (dist < 3) statusTag = '<span class="factor-tag tag-negative">危险</span>';
         else if (dist < 8) statusTag = '<span class="factor-tag tag-neutral">警戒</span>';
       }
-      return `<tr>
+      const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
+      const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
+      return `<tr style="cursor:pointer" onclick="showStockDetail('${s.code}')">
         <td>${s.code||''}</td>
-        <td><b>${s.name||''}</b>${renderMethodTags(s.methods)}</td>
-        <td>${cur || '—'}</td>
-        <td class="${pctCls}">${pct ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
-        <td>${s.addPrice || '—'}</td>
-        <td class="${pnlCls}">${pnl>0?'+':''}${pnl}%</td>
-        <td class="up">${tp || '—'}</td>
-        <td class="down">${sl || '—'}</td>
-        <td class="${mainCls}">${mainStr}</td>
+        <td><b style="color:#58a6ff;text-decoration:underline">${s.name||''}</b>${renderMethodTags(s.methods)}</td>
+        <td style="font-weight:bold">${cur || '—'}</td>
+        <td class="${pctCls}" style="font-weight:bold">${pct ? (pct>=0?'+':'') + pct.toFixed(2) + '%' : '—'}</td>
+        <td>${volume}</td>
+        <td class="${mainCls}" style="font-weight:bold">${mainStr}</td>
         <td class="${retailCls}">${retailIcon} ${retailStr}</td>
+        <td>${pe}</td>
         <td>${statusTag}</td>
-        <td>
+        <td onclick="event.stopPropagation()">
           <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
           <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button>
         </td>
       </tr>`;
     }).join('')}
-  </table></div>`;
+  </table></div>
+  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看个股详细分析</div>`;
 }
 
 // 选股方法颜色映射
@@ -576,4 +581,159 @@ function importWatchlist(event) {
   };
   reader.readAsText(file);
   event.target.value = '';
+}
+
+// 个股详情弹窗 — 点击自选股名称触发
+async function showStockDetail(code) {
+  if (!code) return;
+  const list = getWatchlist();
+  const stock = list.find(s => s.code === code);
+  const stockName = stock?.name || code;
+
+  // 创建弹窗遮罩
+  let overlay = document.getElementById('stockDetailOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'stockDetailOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+
+  // 弹窗主体
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#0d1117;border:1px solid #30363d;border-radius:12px;max-width:800px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;color:#e6e6e6';
+  modal.innerHTML = `<div style="text-align:center;padding:30px;color:#58a6ff">
+    <p>正在加载 ${stockName}（${code}）的详细数据...</p>
+    <div style="margin-top:8px;font-size:12px;color:#8b949e">行情 + 资金流 + K线 + AI分析</div>
+  </div>`;
+  overlay.appendChild(modal);
+
+  // 并行拉取所有数据
+  let quote = null, capFlow = null, emDetail = null;
+  try {
+    [quote, capFlow, emDetail] = await Promise.all([
+      fetchAStockQuote(code).catch(() => null),
+      fetchEMCapitalFlow(code).catch(() => null),
+      fetchEMStockDetail(code).catch(() => null)
+    ]);
+  } catch(e) {}
+
+  // 兜底
+  quote = quote || SAMPLE_STOCKS[code] || { name: stockName, price: '—', pct: 0, pe: '—', pb: '—', volume: '—' };
+
+  const cur = parseFloat(quote.price) || 0;
+  const pct = parseFloat(quote.pct) || 0;
+  const pctCls = pct >= 0 ? 'up' : 'down';
+  const change = parseFloat(quote.change) || 0;
+  const volume = quote.volume || '—';
+  const pe = quote.pe || emDetail?.f162 || '—';
+  const pb = quote.pb || emDetail?.f167 || '—';
+
+  // 资金流汇总
+  let capSummary = '<span style="color:#8b949e">暂无数据</span>';
+  let retailSummary = '<span style="color:#8b949e">暂无数据</span>';
+  let capHistory = '';
+  if (capFlow && capFlow.length) {
+    const latest = capFlow[capFlow.length - 1];
+    const mainCls = latest.main >= 0 ? 'up' : 'down';
+    capSummary = `<span class="${mainCls}" style="font-weight:bold">${latest.main > 0 ? '+' : ''}${latest.main.toFixed(2)}亿</span>
+      <span style="color:#8b949e;font-size:12px;margin-left:8px">${latest.date}</span>`;
+
+    // 近3日散户累计
+    const recentSmall = capFlow.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
+    const retailCls = recentSmall > 0.3 ? 'up' : recentSmall < -0.3 ? 'down' : 'flat';
+    const retailIcon = recentSmall > 0.3 ? '📈' : recentSmall < -0.3 ? '📉' : '➡️';
+    retailSummary = `${retailIcon} <span class="${retailCls}" style="font-weight:bold">${recentSmall > 0 ? '+' : ''}${recentSmall.toFixed(2)}亿（近3日）</span>`;
+
+    // 资金流历史表格
+    capHistory = `<table class="data-table" style="font-size:12px;margin-top:8px">
+      <tr><th>日期</th><th>主力</th><th>超大单</th><th>大单</th><th>中单</th><th>散户</th></tr>
+      ${capFlow.slice(-5).reverse().map(t => {
+        const mCls = t.main >= 0 ? 'up' : 'down';
+        const sCls = t.small >= 0 ? 'up' : 'down';
+        return `<tr>
+          <td>${t.date}</td>
+          <td class="${mCls}">${t.main > 0 ? '+' : ''}${t.main.toFixed(2)}亿</td>
+          <td>${t.super > 0 ? '+' : ''}${t.super.toFixed(2)}亿</td>
+          <td>${t.big > 0 ? '+' : ''}${t.big.toFixed(2)}亿</td>
+          <td>${t.mid > 0 ? '+' : ''}${t.mid.toFixed(2)}亿</td>
+          <td class="${sCls}">${t.small > 0 ? '+' : ''}${t.small.toFixed(2)}亿</td>
+        </tr>`;
+      }).join('')}
+    </table>`;
+  }
+
+  // 自选股信息
+  let watchInfo = '';
+  if (stock) {
+    const addP = parseFloat(stock.addPrice) || 0;
+    const tp = parseFloat(stock.targetPrice) || 0;
+    const sl = parseFloat(stock.stopLoss) || 0;
+    const pnl = addP > 0 ? ((cur - addP) / addP * 100).toFixed(2) : '0.00';
+    const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
+    watchInfo = `<div style="margin-top:12px;padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+      <div style="font-weight:bold;color:#58a6ff;margin-bottom:8px">📋 持仓信息</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:13px">
+        <div>成本价：<b>${stock.addPrice || '—'}</b></div>
+        <div>盈亏：<b class="${pnlCls}">${pnl > 0 ? '+' : ''}${pnl}%</b></div>
+        <div>目标价：<b class="up">${stock.targetPrice || '—'}</b></div>
+        <div>止损价：<b class="down">${stock.stopLoss || '—'}</b></div>
+        <div>买入日期：<b>${stock.addDate || '—'}</b></div>
+        <div>选股理由：<b style="font-size:12px">${stock.reason || '—'}</b></div>
+      </div>
+      ${renderMethodTags(stock.methods)}
+    </div>`;
+  }
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <h2 style="margin:0;color:#e6e6e6">${stockName}</h2>
+        <span style="color:#8b949e;font-size:13px">${code}</span>
+      </div>
+      <button onclick="document.getElementById('stockDetailOverlay').remove()" style="background:#da3633;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">关闭</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px">现价</div>
+        <div style="font-size:22px;font-weight:bold;color:#e6e6e6">${cur || '—'}</div>
+      </div>
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px">涨跌幅</div>
+        <div style="font-size:22px;font-weight:bold" class="${pctCls}">${pct ? (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%' : '—'}</div>
+      </div>
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px">成交额</div>
+        <div style="font-size:18px;font-weight:bold;color:#e6e6e6">${volume}</div>
+      </div>
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px">PE / PB</div>
+        <div style="font-size:18px;font-weight:bold;color:#e6e6e6">${pe} / ${pb}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px;margin-bottom:4px">主力资金（今日）</div>
+        ${capSummary}
+      </div>
+      <div style="padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
+        <div style="color:#8b949e;font-size:12px;margin-bottom:4px">散户动向</div>
+        ${retailSummary}
+      </div>
+    </div>
+
+    ${capHistory ? `<div style="margin-bottom:16px">
+      <div style="font-weight:bold;color:#58a6ff;margin-bottom:8px">💰 近5日资金流向</div>
+      ${capHistory}
+    </div>` : ''}
+
+    ${watchInfo}
+
+    <div style="margin-top:16px;text-align:center">
+      <button class="btn btn-primary" onclick="document.getElementById('stockDetailOverlay').remove();quickAIAnalysis('${code}','${stockName}')" style="margin-right:8px">🧠 AI深度分析</button>
+      <button class="btn btn-blue" onclick="document.getElementById('stockDetailOverlay').remove();editWatchStock('${code}')">✏️ 编辑持仓</button>
+    </div>
+  `;
 }
