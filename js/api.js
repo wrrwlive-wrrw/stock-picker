@@ -7,12 +7,17 @@ const CORS_PROXIES = [
 ];
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
 
-// 带多代理fallback的fetch
-async function fetchWithProxy(url) {
+// 带多代理fallback的fetch（支持GBK/GB2312编码）
+async function fetchWithProxy(url, encoding) {
   for (const proxy of CORS_PROXIES) {
     try {
-      const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(6000) });
-      if (res.ok) return await res.text();
+      const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      if (encoding) {
+        const buf = await res.arrayBuffer();
+        return new TextDecoder(encoding).decode(buf);
+      }
+      return await res.text();
     } catch(e) { continue; }
   }
   throw new Error('所有代理均不可用');
@@ -86,13 +91,13 @@ const SAMPLE_STOCKS = {
   sh600519: { name:'贵州茅台', price:1756.00, change:12.50, pct:0.72, pe:28.5, pb:9.2, volume:'2.3万手' }
 };
 
-// 获取A股实时数据（腾讯接口，多代理fallback）
+// 获取A股实时数据（腾讯接口，多代理fallback，GBK编码）
 async function fetchAStockQuote(code) {
   const cached = getCache('quote_' + code);
   if (cached) return cached;
   try {
     const url = 'http://qt.gtimg.cn/q=' + code;
-    const text = await fetchWithProxy(url);
+    const text = await fetchWithProxy(url, 'gbk');
     const data = parseQQQuote(text, code);
     if (data) { setCache('quote_' + code, data); return data; }
   } catch(e) {
@@ -120,14 +125,14 @@ function parseQQQuote(text, code) {
   };
 }
 
-// 获取指数数据（多代理fallback）
+// 获取指数数据（多代理fallback，GBK编码）
 async function fetchIndexData() {
   const cached = getCache('all_index');
   if (cached) return cached;
   try {
     const codes = 'sh000001,sz399001,sz399006';
     const url = 'http://qt.gtimg.cn/q=' + codes;
-    const text = await fetchWithProxy(url);
+    const text = await fetchWithProxy(url, 'gbk');
     const lines = text.split(';').filter(l => l.trim());
     const result = {};
     lines.forEach(line => {
@@ -210,7 +215,7 @@ async function fetchEMCapitalFlow(code) {
   return null;
 }
 
-// 腾讯智能搜索API - 根据关键词模糊匹配股票（多代理fallback）
+// 腾讯智能搜索API - 根据关键词模糊匹配股票（多代理fallback，GBK编码）
 async function searchStockByKeyword(keyword) {
   if (!keyword || keyword.length < 1) return [];
   const cacheKey = 'search_' + keyword;
@@ -218,7 +223,7 @@ async function searchStockByKeyword(keyword) {
   if (cached) return cached;
   try {
     const searchUrl = 'http://smartbox.gtimg.cn/s3/?v=2&q=' + encodeURIComponent(keyword) + '&t=gp';
-    const text = await fetchWithProxy(searchUrl);
+    const text = await fetchWithProxy(searchUrl, 'gbk');
     const match = text.match(/v_hint="(.+)"/);
     if (!match || !match[1]) return [];
     const items = match[1].split('^');
