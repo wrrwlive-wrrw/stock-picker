@@ -732,7 +732,7 @@ async function showStockDetail(code) {
     ${watchInfo}
 
     <div style="margin-top:16px;text-align:center">
-      <button class="btn btn-primary" onclick="document.getElementById('stockDetailOverlay').remove();quickAIAnalysis('${code}','${stockName}')" style="margin-right:8px">🧠 AI深度分析</button>
+      <button class="btn btn-primary" onclick="startAIAnalysisDirect('${code}','${stockName}')" style="margin-right:8px">🧠 AI深度分析</button>
       <button class="btn btn-blue" onclick="document.getElementById('stockDetailOverlay').remove();editWatchStock('${code}')">✏️ 编辑持仓</button>
     </div>
   `;

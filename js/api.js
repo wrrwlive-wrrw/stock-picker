@@ -1,6 +1,22 @@
 // API封装、缓存、示例数据
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://api.codetabs.com/v1/proxy?quest='
+];
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+
+// 带多代理fallback的fetch
+async function fetchWithProxy(url) {
+  for (const proxy of CORS_PROXIES) {
+    try {
+      const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(6000) });
+      if (res.ok) return await res.text();
+    } catch(e) { continue; }
+  }
+  throw new Error('所有代理均不可用');
+}
 
 // 缓存读取
 function getCache(key) {
@@ -70,21 +86,26 @@ const SAMPLE_STOCKS = {
   sh600519: { name:'贵州茅台', price:1756.00, change:12.50, pct:0.72, pe:28.5, pb:9.2, volume:'2.3万手' }
 };
 
-// 获取A股实时数据（腾讯接口）
+// 获取A股实时数据（腾讯接口，多代理fallback）
 async function fetchAStockQuote(code) {
-  const cached = getCache(code);
+  const cached = getCache('quote_' + code);
   if (cached) return cached;
   try {
-    const url = `${CORS_PROXY}${encodeURIComponent('http://qt.gtimg.cn/q=' + code)}`;
-    const res = await fetch(url);
-    const text = await res.text();
+    const url = 'http://qt.gtimg.cn/q=' + code;
+    const text = await fetchWithProxy(url);
     const data = parseQQQuote(text, code);
-    if (data) setCache(code, data);
-    return data;
+    if (data) { setCache('quote_' + code, data); return data; }
   } catch(e) {
-    console.warn('API请求失败，使用示例数据', e);
-    return SAMPLE_STOCKS[code] || null;
+    console.warn('行情API失败', code, e.message);
   }
+  // 兜底：用SAMPLE_STOCKS精确匹配
+  if (SAMPLE_STOCKS[code]) return SAMPLE_STOCKS[code];
+  // 模糊匹配：code只取后6位
+  const pureCode = code.replace(/^(sh|sz)/, '');
+  for (const [k, v] of Object.entries(SAMPLE_STOCKS)) {
+    if (k.endsWith(pureCode)) return v;
+  }
+  return null;
 }
 
 // 解析腾讯股票数据
@@ -99,15 +120,14 @@ function parseQQQuote(text, code) {
   };
 }
 
-// 获取指数数据
+// 获取指数数据（多代理fallback）
 async function fetchIndexData() {
   const cached = getCache('all_index');
   if (cached) return cached;
   try {
     const codes = 'sh000001,sz399001,sz399006';
-    const url = `${CORS_PROXY}${encodeURIComponent('http://qt.gtimg.cn/q=' + codes)}`;
-    const res = await fetch(url);
-    const text = await res.text();
+    const url = 'http://qt.gtimg.cn/q=' + codes;
+    const text = await fetchWithProxy(url);
     const lines = text.split(';').filter(l => l.trim());
     const result = {};
     lines.forEach(line => {
@@ -154,30 +174,30 @@ function toEMCode(code) {
   return code;
 }
 
-// 获取东方财富详细行情
+// 获取东方财富详细行情（多代理fallback）
 async function fetchEMStockDetail(code) {
   const cached = getCache('em_' + code);
   if (cached) return cached;
   try {
     const emCode = toEMCode(code);
     const fields = 'f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f163,f167,f168,f169,f170,f171,f173,f177,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192';
-    const url = `${CORS_PROXY}${encodeURIComponent(EM_QUOTE_URL+'?secid='+emCode+'&fields='+fields)}`;
-    const res = await fetch(url);
-    const json = await res.json();
+    const url = EM_QUOTE_URL+'?secid='+emCode+'&fields='+fields;
+    const text = await fetchWithProxy(url);
+    const json = JSON.parse(text);
     if (json.data) { setCache('em_'+code, json.data); return json.data; }
   } catch(e) { console.warn('东方财富API失败', e); }
   return null;
 }
 
-// 获取东方财富资金流向（近10日）
+// 获取东方财富资金流向（近10日，多代理fallback）
 async function fetchEMCapitalFlow(code) {
   const cached = getCache('em_cap_' + code);
   if (cached) return cached;
   try {
     const emCode = toEMCode(code);
-    const url = `${CORS_PROXY}${encodeURIComponent(EM_CAPITAL_URL+'?secid='+emCode+'&klt=101&lmt=10&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57')}`;
-    const res = await fetch(url);
-    const json = await res.json();
+    const url = EM_CAPITAL_URL+'?secid='+emCode+'&klt=101&lmt=10&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57';
+    const text = await fetchWithProxy(url);
+    const json = JSON.parse(text);
     if (json.data && json.data.klines) {
       const result = json.data.klines.map(k => {
         const p = k.split(',');
@@ -190,8 +210,7 @@ async function fetchEMCapitalFlow(code) {
   return null;
 }
 
-// 腾讯智能搜索API - 根据关键词模糊匹配股票
-// 返回格式：[{code:'sh600519', name:'贵州茅台'}, ...]
+// 腾讯智能搜索API - 根据关键词模糊匹配股票（多代理fallback）
 async function searchStockByKeyword(keyword) {
   if (!keyword || keyword.length < 1) return [];
   const cacheKey = 'search_' + keyword;
@@ -199,17 +218,13 @@ async function searchStockByKeyword(keyword) {
   if (cached) return cached;
   try {
     const searchUrl = 'http://smartbox.gtimg.cn/s3/?v=2&q=' + encodeURIComponent(keyword) + '&t=gp';
-    const url = `${CORS_PROXY}${encodeURIComponent(searchUrl)}`;
-    const res = await fetch(url);
-    const text = await res.text();
-    // 格式: v_hint="GP~code~name~..."
+    const text = await fetchWithProxy(searchUrl);
     const match = text.match(/v_hint="(.+)"/);
     if (!match || !match[1]) return [];
     const items = match[1].split('^');
     const results = [];
     items.forEach(item => {
       const parts = item.split('~');
-      // parts[0]=类型, parts[1]=市场(sh/sz), parts[2]=代码, parts[3]=名称, parts[4]=简拼
       if (parts.length >= 3 && (parts[1] === 'sh' || parts[1] === 'sz')) {
         results.push({ code: parts[1] + parts[2], name: parts[3] || parts[2] });
       }

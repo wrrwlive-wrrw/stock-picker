@@ -222,6 +222,93 @@ async function startAIAnalysis() {
   btn.disabled = false;
 }
 
+// 从弹窗直接调用的AI分析（不依赖DOM元素）
+async function startAIAnalysisDirect(code, name) {
+  const apiKey = getAIKey();
+  if (!apiKey) { alert('请先在"每日分析"页面配置API Key'); return; }
+
+  // 在弹窗中显示分析状态
+  const overlay = document.getElementById('stockDetailOverlay');
+  if (!overlay) return;
+  const modal = overlay.querySelector('div[style*="background:#0d1117"]');
+  if (!modal) return;
+
+  // 插入加载提示
+  let loadDiv = document.getElementById('aiDirectLoading');
+  if (loadDiv) loadDiv.remove();
+  loadDiv = document.createElement('div');
+  loadDiv.id = 'aiDirectLoading';
+  loadDiv.style.cssText = 'margin-top:16px;padding:16px;background:#161b22;border-radius:8px;border:1px solid #1f6feb;text-align:center';
+  loadDiv.innerHTML = '<p style="color:#58a6ff;font-size:15px">🧠 AI深度分析启动中...</p><p style="color:#8b949e;font-size:12px" id="aiDirectStatus">正在获取行情数据...</p>';
+  modal.appendChild(loadDiv);
+  loadDiv.scrollIntoView({ behavior: 'smooth' });
+
+  const statusEl = document.getElementById('aiDirectStatus');
+
+  // 第一步：获取行情
+  statusEl.textContent = '正在获取实时行情...';
+  let quoteData = null;
+  try { quoteData = await fetchAStockQuote(code); } catch(e) {}
+  quoteData = quoteData || SAMPLE_STOCKS[code] || null;
+
+  if (!quoteData) {
+    loadDiv.innerHTML = '<p style="color:#ea3943">⚠️ 无法获取该股票行情数据</p>';
+    return;
+  }
+  if (quoteData.name && !name) name = quoteData.name;
+  statusEl.textContent = `${name}（${code}）行情获取成功，AI分析中...`;
+
+  // 第二步：获取资金流
+  let capitalData = null;
+  try { capitalData = await fetchEMCapitalFlow(code); } catch(e) {}
+
+  // 第三步：获取大盘
+  let marketData = null;
+  try { marketData = await fetchIndexData(); } catch(e) {}
+
+  statusEl.textContent = 'AI深度分析中，请稍候（约15-30秒）...';
+
+  // 第四步：调用AI
+  const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData);
+  try {
+    const res = await fetch(AI_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({
+        model: 'Qwen/Qwen3-32B',
+        temperature: 0.4,
+        max_tokens: 12000,
+        enable_thinking: false,
+        messages: [
+          { role: 'system', content: getStockAgentSystemPrompt() },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      let errMsg = '状态码 ' + res.status;
+      if (res.status === 401) errMsg = 'API Key无效或已过期';
+      else if (res.status === 429) errMsg = '调用频率超限，请稍后再试';
+      else if (res.status === 403) errMsg = 'API Key权限不足';
+      throw new Error(errMsg);
+    }
+    const data = await res.json();
+    let text = data.choices?.[0]?.message?.content || '';
+    text = cleanAIResponse(text);
+    if (!text) throw new Error('AI返回内容为空');
+    const price = quoteData?.price || '';
+    loadDiv.innerHTML = renderAIAgentReport(text, code, name, price);
+  } catch(e) {
+    console.error('AI分析失败', e);
+    loadDiv.innerHTML = `<div style="border:1px solid #da3633;border-radius:8px;padding:16px">
+      <p style="color:#ea3943;font-weight:bold">分析失败</p>
+      <p style="color:#ea3943;font-size:13px">${e.message || e}</p>
+      <p style="color:#8b949e;font-size:12px;margin-top:8px">请检查API Key是否有效，或稍后重试</p>
+    </div>`;
+  }
+}
+
 // 清理AI返回文本中的思考标签
 function cleanAIResponse(text) {
   text = text.replace(/<think>[\s\S]*?<\/think>/g, '');
