@@ -156,8 +156,8 @@ async function startAIAnalysis() {
     return;
   }
 
-  // 用API返回的真实名称更新name
-  if (quoteData.name && !name) name = quoteData.name;
+  // 用API返回的真实名称始终更新name（API数据最准确）
+  if (quoteData.name) name = quoteData.name;
   status.textContent = `${quoteData.name}(${code}) 行情获取成功，AI分析中...`;
 
   // 第二步：获取资金流向
@@ -228,10 +228,8 @@ async function startAIAnalysisDirect(code, name) {
   if (!apiKey) { alert('请先在"每日分析"页面配置API Key'); return; }
 
   // 在弹窗中显示分析状态
-  const overlay = document.getElementById('stockDetailOverlay');
-  if (!overlay) return;
-  const modal = overlay.querySelector('div[style*="background:#0d1117"]');
-  if (!modal) return;
+  const modal = document.getElementById('stockDetailModal');
+  if (!modal) { alert('弹窗已关闭，请重新打开'); return; }
 
   // 插入加载提示
   let loadDiv = document.getElementById('aiDirectLoading');
@@ -255,7 +253,7 @@ async function startAIAnalysisDirect(code, name) {
     loadDiv.innerHTML = '<p style="color:#ea3943">⚠️ 无法获取该股票行情数据</p>';
     return;
   }
-  if (quoteData.name && !name) name = quoteData.name;
+  if (quoteData.name) name = quoteData.name;
   statusEl.textContent = `${name}（${code}）行情获取成功，AI分析中...`;
 
   // 第二步：获取资金流
@@ -275,7 +273,7 @@ async function startAIAnalysisDirect(code, name) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
-        model: 'Qwen/Qwen3-32B',
+        model: AI_MODEL,
         temperature: 0.4,
         max_tokens: 12000,
         enable_thinking: false,
@@ -450,6 +448,8 @@ ${dataSection}
 
 // 渲染AI分析报告为HTML
 function renderAIAgentReport(text, code, name, price) {
+  // 转义字符串用于JS内嵌
+  const esc = s => (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   let html = text;
   // 标题转换
   html = html.replace(/^### (.+)$/gm, '<h4 style="color:#58a6ff;margin:12px 0 6px">$1</h4>');
@@ -489,7 +489,7 @@ function renderAIAgentReport(text, code, name, price) {
     </div>
     <div style="line-height:1.7;color:#c9d1d9">${html}</div>
     <div style="margin-top:16px;padding-top:12px;border-top:1px solid #21262d;display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" onclick="addToWatchlist('${code}','${name||''}','${price||''}','AI智能体分析推荐')">加入自选股</button>
+      <button class="btn btn-primary btn-sm" onclick="addToWatchlist('${esc(code)}','${esc(name)}','${esc(price)}','AI智能体分析推荐')">加入自选股</button>
       <button class="btn btn-blue btn-sm" onclick="startAIAnalysis()">重新分析</button>
     </div>
   </div>`;
