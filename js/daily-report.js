@@ -184,7 +184,7 @@ ${dataStr}
 格式要求：使用markdown格式，##分段，关键数据加粗，结论给出概率判断。限制2000字以内。`;
 }
 
-function buildWatchlistReportPrompt(watchlist, indexData) {
+function buildWatchlistReportPrompt(watchlist, indexData, quotes) {
   const idx = indexData || SAMPLE_INDEX;
   let marketStr = '';
   for (const [k, v] of Object.entries(idx)) {
@@ -193,27 +193,52 @@ function buildWatchlistReportPrompt(watchlist, indexData) {
     }
   }
   let stockStr = watchlist.map((s, i) => {
+    const qData = (quotes && quotes[s.code]) || {};
+    const q = qData.quote || {};
+    const capFlow = qData.capFlow;
+    // 使用实时价格
+    const price = q.price || s.price || '—';
+    const pct = q.pct !== undefined ? (q.pct > 0 ? '+' : '') + q.pct + '%' : '未知';
+    const pe = q.pe || '—';
+    const pb = q.pb || '—';
+    const volume = q.volume || '—';
+    // 资金流
+    let capStr = '资金数据未知';
+    if (capFlow && capFlow.length) {
+      const latest = capFlow[capFlow.length - 1];
+      capStr = `主力${latest.main > 0 ? '+' : ''}${latest.main.toFixed(2)}亿`;
+      // 近3日散户
+      const recentSmall = capFlow.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
+      capStr += ` | 散户${recentSmall > 0 ? '流入' : '流出'}${Math.abs(recentSmall).toFixed(2)}亿`;
+    }
+    // 盈亏计算
     const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
-    const pnl = costNum > 0 && s.price ? (((parseFloat(s.price) - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
+    const curPrice = parseFloat(price) || 0;
+    const pnl = costNum > 0 && curPrice > 0 ? (((curPrice - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
     const methods = (s.methods || []).join('/') || '无';
-    return `${i+1}. ${s.name}(${s.code}) | 现价:${s.price||'未知'} | 成本:${s.costPrice||s.addPrice||'未知'} | 盈亏:${pnl} | 目标价:${s.targetPrice||'未设'} | 止损价:${s.stopLoss||'未设'} | 选股方法:${methods} | 买入理由:${s.reason||'无'}`;
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} PB:${pb} 成交量:${volume} | 成本:${s.costPrice||s.addPrice||'未知'} 盈亏:${pnl} | 目标价:${s.targetPrice||'未设'} 止损价:${s.stopLoss||'未设'} | ${capStr} | 选股方法:${methods} | 买入理由:${s.reason||'无'}`;
   }).join('\n');
 
-  return `你是资深A股投研总监，请对以下自选股组合进行今日深度体检分析：
+  return `你是资深A股投研总监，请对以下自选股组合进行今日深度体检分析（所有行情数据均为实时数据）：
 
 大盘环境（实时数据）：
 ${marketStr}
 
-自选股列表（含选股方法和盈亏状态）：
+自选股列表（含实时行情、资金流、成本盈亏）：
 ${stockStr}
 
 对每只股票必须分析：
 1. 当前技术面状态（趋势方向、关键均线位置、支撑/压力位）
-2. 资金面判断（主力进出方向、量能变化）
-3. 估值水平（PE/PB与行业对比）
+2. 资金面判断（主力进出方向、量能变化、散户情绪）
+3. 估值水平（PE/PB与行业对比，是否存在泡沫）
 4. 风险评估（距止损位距离、潜在风险点、暴雷概率）
-5. 明确操作信号：买入/加仓/持有/减仓/清仓（必须给出明确信号，不能含糊）
+5. 持仓盈亏分析：基于成本价和当前价，给出明确的持有/减仓/清仓建议
 6. 具体操作价位：买入区间、目标价、止损价
+
+**核心要求**：每只股票必须给出以下明确信号之一：
+- 🟢 **建议持有**（附持有理由和目标价）
+- 🟡 **建议减仓**（附减仓比例和时机）
+- 🔴 **建议清仓**（附清仓理由和止损价）
 
 最后给出：
 - 组合整体健康度评分（1-100分）
@@ -274,11 +299,30 @@ async function doGenerateWatchlistReport() {
 
   const watchlist = JSON.parse(localStorage.getItem('stock_watchlist_' + currentUser.username) || '[]');
   if (!watchlist.length) { statusEl.innerHTML = '<span style="color:#f85149">自选股为空，请先添加自选股</span>'; return; }
-  statusEl.innerHTML = '⏳ 正在分析自选股组合...';
+  statusEl.innerHTML = '⏳ 正在拉取实时行情和资金流数据...';
+
+  // 并行拉取所有自选股实时行情+资金流
+  const quotes = {};
+  const capFetches = watchlist.map(async s => {
+    try {
+      const [quote, capFlow] = await Promise.all([
+        fetchAStockQuote(s.code).catch(() => null),
+        fetchEMCapitalFlow(s.code).catch(() => null)
+      ]);
+      quotes[s.code] = {
+        quote: quote || SAMPLE_STOCKS[s.code] || null,
+        capFlow: capFlow && capFlow.length ? capFlow : null
+      };
+    } catch(e) {
+      quotes[s.code] = { quote: SAMPLE_STOCKS[s.code] || null, capFlow: null };
+    }
+  });
+  await Promise.allSettled(capFetches);
+  statusEl.innerHTML = '⏳ 实时数据已获取，AI分析中...';
 
   try {
     const indexData = await fetchIndexData();
-    const prompt = buildWatchlistReportPrompt(watchlist, indexData);
+    const prompt = buildWatchlistReportPrompt(watchlist, indexData, quotes);
     const result = await callReportAI(apiKey, prompt);
     const today = new Date().toISOString().slice(0, 10);
     const html = formatReportContent(result);
