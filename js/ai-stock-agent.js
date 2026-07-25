@@ -179,7 +179,8 @@ async function startAIAnalysis() {
   status.textContent = 'AI深度分析中，请稍候（约15-30秒）...';
 
   // 第四步：构建Prompt并调用AI
-  const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData);
+  const watchStock2 = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
+  const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock2);
   try {
     const res = await fetch(AI_API_URL, {
       method: 'POST',
@@ -267,7 +268,8 @@ async function startAIAnalysisDirect(code, name) {
   statusEl.textContent = 'AI深度分析中，请稍候（约15-30秒）...';
 
   // 第四步：调用AI
-  const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData);
+  const watchStock = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
+  const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock);
   try {
     const res = await fetch(AI_API_URL, {
       method: 'POST',
@@ -339,7 +341,7 @@ function getStockAgentSystemPrompt() {
 }
 
 // 构建个股深度分析 Prompt
-function buildStockAgentPrompt(code, name, quote, capital, market) {
+function buildStockAgentPrompt(code, name, quote, capital, market, watchStock) {
   let dataSection = '';
   if (quote) {
     dataSection += `\n【实时行情数据】
@@ -351,6 +353,20 @@ function buildStockAgentPrompt(code, name, quote, capital, market) {
 - 成交量：${quote.volume || '—'}`;
   } else {
     dataSection += `\n【股票】${name || ''}（${code}）— 实时行情获取失败，请基于你的知识分析`;
+  }
+
+  // 持仓信息
+  if (watchStock) {
+    const cost = parseFloat(watchStock.costPrice) || parseFloat(watchStock.addPrice) || 0;
+    const cur = parseFloat(quote?.price) || 0;
+    const pnl = cost > 0 && cur > 0 ? ((cur - cost) / cost * 100).toFixed(2) : '—';
+    dataSection += `\n\n【持仓信息】
+- 成本价：${watchStock.costPrice || watchStock.addPrice || '—'}
+- 当前盈亏：${pnl !== '—' ? (pnl >= 0 ? '+' : '') + pnl + '%' : '—'}
+- 目标价：${watchStock.targetPrice || '未设置'}
+- 止损价：${watchStock.stopLoss || '未设置'}
+- 选股理由：${watchStock.reason || '—'}
+- 选股方法：${(watchStock.methods || []).join('、') || '—'}`;
   }
 
   if (capital && capital.length > 0) {
@@ -422,10 +438,31 @@ ${dataSection}
 ## 八、行业对比
 与同行业2-3家公司横向对比核心指标
 
-## 九、分阶段交易策略
+## 九、行业周期与企业基本面综合分析
+1. 行业当前所处周期阶段（萌芽/成长/成熟/衰退）及未来趋势判断
+2. 行业竞争格局（集中度变化、新进入者威胁、替代品风险）
+3. 企业核心竞争力（护城河类型：品牌/技术/规模/网络效应）
+4. 企业战略方向是否与行业趋势一致
+5. 管理层执行力评估
+
+## 十、持仓盈亏分析与持有/卖出建议（核心）
+基于以下维度综合给出明确的持有或卖出建议：
+1. **成本价分析**：当前价vs成本价，盈亏状态及趋势判断
+2. **估值合理性**：当前估值在行业中的位置，是否存在泡沫
+3. **资金面信号**：主力资金流向是否支持继续持有
+4. **技术面位置**：当前股价所处位置（底部/中部/顶部）
+5. **行业景气度**：行业周期是否支持长期持有
+6. **企业基本面**：盈利能力、成长性、财务健康度
+
+**输出要求**：必须明确给出以下之一：
+- 🟢 **建议持有**：给出持有理由和目标价
+- 🟡 **建议减仓**：给出减仓比例和时机
+- 🔴 **建议清仓**：给出清仓理由和止损价
+
+## 十一、分阶段交易策略
 | 项目 | 建议 |
 |------|------|
-| 当前操作 | 买入/观望/减仓/清仓 |
+| 当前操作 | 持有/减仓/清仓 |
 | 短线策略(1-2周) | 具体操作和目标价 |
 | 中线策略(1-3月) | 具体操作和目标价 |
 | 长线策略(3-12月) | 具体操作和目标价 |
@@ -436,7 +473,7 @@ ${dataSection}
 | 仓位建议 | 初始仓位%→加仓后% |
 | 最佳买入时机 | 具体条件描述 |
 
-## 十、总结与下一步行动
+## 十二、总结与下一步行动
 1. 3条核心结论
 2. 当前最优操作（立即可执行）
 3. 未来一周关注的关键事件/数据

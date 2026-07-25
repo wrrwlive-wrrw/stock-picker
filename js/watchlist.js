@@ -44,13 +44,14 @@ function filterWatchlist(tag) {
   renderWatchlist(document.getElementById('mainContent'));
 }
 
-// 添加自选股（不再弹出prompt，直接添加）
-function addToWatchlist(code, name, price, reason, methods) {
+// 添加自选股（支持成本价）
+function addToWatchlist(code, name, price, reason, methods, costPrice) {
   if (!currentUser) { alert('请先登录'); return; }
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
   list.push({
     code, name, price: price || '—',
+    costPrice: costPrice || price || '—',
     reason: reason || '',
     methods: Array.isArray(methods) ? methods : [],
     addDate: new Date().toISOString().slice(0, 10),
@@ -118,9 +119,10 @@ function renderWatchlist(el) {
     <div class="card">
       <div class="card-title">我的自选股（${list.length}只）</div>
       <div class="toolbar">
-        <input type="text" id="watchAddCode" placeholder="股票代码 如sh600519" style="width:160px">
-        <input type="text" id="watchAddName" placeholder="名称" style="width:100px">
-        <input type="text" id="watchAddPrice" placeholder="现价" style="width:80px">
+        <input type="text" id="watchAddCode" placeholder="代码 如sh600519" style="width:140px">
+        <input type="text" id="watchAddName" placeholder="名称" style="width:80px">
+        <input type="text" id="watchAddPrice" placeholder="现价" style="width:70px">
+        <input type="text" id="watchAddCost" placeholder="成本价" style="width:70px">
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
         <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
         <span style="margin-left:12px;border-left:1px solid #30363d;padding-left:12px">
@@ -138,7 +140,7 @@ function renderWatchlist(el) {
         }).join('')}
       </div>` : ''}
       <div style="margin-top:8px;font-size:12px;color:#8b949e">
-        💡 提示：添加自选股时可设置目标价和止损价，系统将每日自动体检并提示交易信号。点击"编辑"可设置选股方法标签。
+        💡 提示：成本价用于计算持仓盈亏，结合AI分析给出持有/卖出建议。点击"编辑"可设置目标价、止损价、选股方法。
       </div>
     </div>
     <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据...</p></div></div>
@@ -212,18 +214,17 @@ async function refreshWatchlistRealTime() {
 // 使用真实数据渲染表格（股票名称可点击查看详情）
 function renderWatchTableRealTime(list, results) {
   return `<div style="overflow-x:auto"><table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成交额</th><th>主力资金</th><th>散户动向</th><th>PE</th><th>状态</th><th>操作</th></tr>
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成本价</th><th>盈亏</th><th>主力资金</th><th>PE</th><th>状态</th><th>操作</th></tr>
     ${list.map(s => {
       const r = results[s.code] || {};
       const q = r.quote || {};
       const capFlow = r.capFlow;
       const cur = parseFloat(q.price) || parseFloat(s.price) || 0;
-      const add = parseFloat(s.addPrice) || cur;
+      const cost = parseFloat(s.costPrice) || parseFloat(s.addPrice) || 0;
       const tp = parseFloat(s.targetPrice) || 0;
       const sl = parseFloat(s.stopLoss) || 0;
       const pct = q.pct !== undefined ? parseFloat(q.pct) : 0;
       const pctCls = pct >= 0 ? 'up' : 'down';
-      const volume = q.volume || '—';
       const pe = q.pe || '—';
       let mainStr = '—', mainCls = 'flat';
       if (capFlow && capFlow.length) {
@@ -231,12 +232,13 @@ function renderWatchTableRealTime(list, results) {
         mainStr = (latest.main > 0 ? '+' : '') + latest.main.toFixed(2) + '亿';
         mainCls = latest.main >= 0 ? 'up' : 'down';
       }
-      let retailStr = '—', retailCls = 'flat', retailIcon = '';
-      if (capFlow && capFlow.length >= 2) {
-        const recentSmall = capFlow.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
-        if (recentSmall > 0.3) { retailStr = '流入' + recentSmall.toFixed(2) + '亿'; retailCls = 'up'; retailIcon = '📈'; }
-        else if (recentSmall < -0.3) { retailStr = '流出' + Math.abs(recentSmall).toFixed(2) + '亿'; retailCls = 'down'; retailIcon = '📉'; }
-        else { retailStr = '净额' + recentSmall.toFixed(2) + '亿'; retailCls = 'flat'; retailIcon = '➡️'; }
+      // 成本价和盈亏计算
+      let costStr = '—', pnlStr = '—', pnlCls = 'flat';
+      if (cost > 0 && cur > 0) {
+        costStr = cost.toFixed(2);
+        const pnlPct = ((cur - cost) / cost * 100).toFixed(2);
+        pnlStr = (pnlPct >= 0 ? '+' : '') + pnlPct + '%';
+        pnlCls = pnlPct >= 0 ? 'up' : 'down';
       }
       let stopDist = '—', stopCls = 'flat', statusTag = '<span class="factor-tag tag-positive">安全</span>';
       if (sl > 0 && cur > 0) {
@@ -247,26 +249,24 @@ function renderWatchTableRealTime(list, results) {
         else if (dist < 3) statusTag = '<span class="factor-tag tag-negative">危险</span>';
         else if (dist < 8) statusTag = '<span class="factor-tag tag-neutral">警戒</span>';
       }
-      const pnl = add > 0 ? ((cur - add) / add * 100).toFixed(2) : '0.00';
-      const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
-      return `<tr style="cursor:pointer" onclick="showStockDetail('${s.code}')">
+      return `<tr style="cursor:pointer" onclick="showStockDetail('${esc(s.code)}')">
         <td>${s.code||''}</td>
-        <td><b style="color:#58a6ff;text-decoration:underline">${s.name||''}</b>${renderMethodTags(s.methods)}</td>
+        <td><b style="color:#58a6ff;text-decoration:underline">${esc(s.name||'')}</b>${renderMethodTags(s.methods)}</td>
         <td style="font-weight:bold">${cur || '—'}</td>
         <td class="${pctCls}" style="font-weight:bold">${pct ? (pct>=0?'+':'') + pct.toFixed(2) + '%' : '—'}</td>
-        <td>${volume}</td>
+        <td>${costStr}</td>
+        <td class="${pnlCls}" style="font-weight:bold">${pnlStr}</td>
         <td class="${mainCls}" style="font-weight:bold">${mainStr}</td>
-        <td class="${retailCls}">${retailIcon} ${retailStr}</td>
         <td>${pe}</td>
         <td>${statusTag}</td>
         <td onclick="event.stopPropagation()">
-          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${s.code}')">编辑</button>
-          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${s.code}')">移除</button>
+          <button class="btn btn-blue btn-sm" onclick="editWatchStock('${esc(s.code)}')">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="removeFromWatchlist('${esc(s.code)}')">移除</button>
         </td>
       </tr>`;
     }).join('')}
   </table></div>
-  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看个股详细分析</div>`;
+  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看详细分析，盈亏基于成本价计算</div>`;
 }
 
 // 选股方法颜色映射
@@ -396,11 +396,13 @@ function manualAddWatch() {
   const code = document.getElementById('watchAddCode').value.trim();
   const name = document.getElementById('watchAddName').value.trim();
   const price = document.getElementById('watchAddPrice').value.trim();
+  const costPrice = document.getElementById('watchAddCost')?.value.trim() || '';
   if (!code || !name) { alert('请输入代码和名称'); return; }
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
   list.push({
     code, name, price: price || '—',
+    costPrice: costPrice || price || '—',
     reason: '手动添加',
     methods: [],
     addDate: new Date().toISOString().slice(0, 10),
@@ -448,12 +450,14 @@ function editWatchStock(code) {
   // 使用多步prompt收集信息
   const tp = prompt(`编辑 ${stock.name} 的目标价（当前：${stock.targetPrice || '未设置'}）：`, stock.targetPrice || '');
   const sl = prompt(`编辑 ${stock.name} 的止损价（当前：${stock.stopLoss || '未设置'}）：`, stock.stopLoss || '');
+  const cp = prompt(`编辑 ${stock.name} 的买入成本价（当前：${stock.costPrice || '未设置'}）：`, stock.costPrice || '');
   const r = prompt(`编辑 ${stock.name} 的买入理由（当前：${stock.reason || ''}）：`, stock.reason || '');
   // 选股方法：逗号分隔
   const currentMethods = (stock.methods || []).join('、');
   const m = prompt(`编辑选股方法（当前：${currentMethods || '无'}）\n可选标签：${METHOD_TAGS.join('、')}\n多个用逗号分隔，如：价值投资,行业龙头,高分红`, currentMethods);
   if (tp !== null) stock.targetPrice = tp;
   if (sl !== null) stock.stopLoss = sl;
+  if (cp !== null) stock.costPrice = cp;
   if (r !== null) stock.reason = r;
   if (m !== null) {
     stock.methods = m.split(/[,，、]/).map(s=>s.trim()).filter(s=>s);
@@ -601,6 +605,7 @@ async function showStockDetail(code) {
 
   // 弹窗主体
   const modal = document.createElement('div');
+  modal.id = 'stockDetailModal';
   modal.style.cssText = 'background:#0d1117;border:1px solid #30363d;border-radius:12px;max-width:800px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;color:#e6e6e6';
   modal.innerHTML = `<div style="text-align:center;padding:30px;color:#58a6ff">
     <p>正在加载 ${stockName}（${code}）的详细数据...</p>
@@ -666,16 +671,17 @@ async function showStockDetail(code) {
   // 自选股信息
   let watchInfo = '';
   if (stock) {
-    const addP = parseFloat(stock.addPrice) || 0;
+    const costP = parseFloat(stock.costPrice) || parseFloat(stock.addPrice) || 0;
     const tp = parseFloat(stock.targetPrice) || 0;
     const sl = parseFloat(stock.stopLoss) || 0;
-    const pnl = addP > 0 ? ((cur - addP) / addP * 100).toFixed(2) : '0.00';
+    const pnl = costP > 0 ? ((cur - costP) / costP * 100).toFixed(2) : '0.00';
     const pnlCls = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
+    const pnlAmount = costP > 0 && cur > 0 ? ((cur - costP) * 100).toFixed(0) : '—';
     watchInfo = `<div style="margin-top:12px;padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d">
       <div style="font-weight:bold;color:#58a6ff;margin-bottom:8px">📋 持仓信息</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:13px">
-        <div>成本价：<b>${stock.addPrice || '—'}</b></div>
-        <div>盈亏：<b class="${pnlCls}">${pnl > 0 ? '+' : ''}${pnl}%</b></div>
+        <div>成本价：<b>${stock.costPrice || stock.addPrice || '—'}</b></div>
+        <div>盈亏：<b class="${pnlCls}">${pnl > 0 ? '+' : ''}${pnl}%（${pnlAmount}元/百股）</b></div>
         <div>目标价：<b class="up">${stock.targetPrice || '—'}</b></div>
         <div>止损价：<b class="down">${stock.stopLoss || '—'}</b></div>
         <div>买入日期：<b>${stock.addDate || '—'}</b></div>

@@ -193,9 +193,10 @@ function buildWatchlistReportPrompt(watchlist, indexData) {
     }
   }
   let stockStr = watchlist.map((s, i) => {
-    const pnl = s.addPrice && s.price ? (((parseFloat(s.price) - parseFloat(s.addPrice)) / parseFloat(s.addPrice)) * 100).toFixed(2) + '%' : '未知';
+    const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
+    const pnl = costNum > 0 && s.price ? (((parseFloat(s.price) - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
     const methods = (s.methods || []).join('/') || '无';
-    return `${i+1}. ${s.name}(${s.code}) | 现价:${s.price||'未知'} | 成本:${s.addPrice||'未知'} | 盈亏:${pnl} | 目标价:${s.targetPrice||'未设'} | 止损价:${s.stopLoss||'未设'} | 选股方法:${methods} | 买入理由:${s.reason||'无'}`;
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${s.price||'未知'} | 成本:${s.costPrice||s.addPrice||'未知'} | 盈亏:${pnl} | 目标价:${s.targetPrice||'未设'} | 止损价:${s.stopLoss||'未设'} | 选股方法:${methods} | 买入理由:${s.reason||'无'}`;
   }).join('\n');
 
   return `你是资深A股投研总监，请对以下自选股组合进行今日深度体检分析：

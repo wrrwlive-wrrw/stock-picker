@@ -60,10 +60,11 @@ function buildWatchlistSummary(watchlist, quotes) {
       const small = trend[0].small || 0;
       retailStr = small > 0 ? `散户流入${small.toFixed(2)}亿` : `散户流出${Math.abs(small).toFixed(2)}亿`;
     }
-    const cost = s.addPrice || '未知';
+    const cost = s.costPrice || s.addPrice || '未知';
     const target = s.targetPrice || '未设';
     const stop = s.stopLoss || '未设';
-    const pnl = s.addPrice ? (((parseFloat(price) - parseFloat(s.addPrice)) / parseFloat(s.addPrice)) * 100).toFixed(2) + '%' : '未知';
+    const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
+    const pnl = costNum > 0 ? (((parseFloat(price) - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
     const methods = (s.methods || []).join('/') || '无';
     return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | 选股方法:${methods}`;
   }).join('\n');
