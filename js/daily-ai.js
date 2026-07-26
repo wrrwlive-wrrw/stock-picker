@@ -212,6 +212,7 @@ function setAIKey() {
   if (!v) { alert('请输入API Key'); return; }
   if (!v.startsWith('sk-')) { alert('API Key格式不正确，应以sk-开头'); return; }
   saveAIKey(v);
+  if (typeof autoBackupUserData === 'function') autoBackupUserData();
   alert('API Key已保存');
   renderDailyAI(document.getElementById('mainContent'));
 }

@@ -11,6 +11,7 @@ function saveReport(report) {
   list.unshift(report);
   if (list.length > 60) list.length = 60;
   localStorage.setItem(key, JSON.stringify(list));
+  if (typeof autoBackupUserData === 'function') autoBackupUserData();
 }
 
 function deleteReport(id) {
@@ -285,7 +286,7 @@ async function autoGenerateToday() {
   const statusEl = document.getElementById('reportGenStatus');
   if (statusEl) statusEl.innerHTML = '⏳ 自动生成中...';
   await doGenerateMarketReport();
-  const watchlist = JSON.parse(localStorage.getItem('stock_watchlist_' + currentUser.username) || '[]');
+  const watchlist = JSON.parse(localStorage.getItem('stock_watchlist_' + (currentUser?.username || 'guest')) || '[]');
   if (watchlist.length > 0) {
     await doGenerateWatchlistReport();
   }
@@ -297,7 +298,7 @@ async function doGenerateWatchlistReport() {
   const apiKey = getAIKey();
   if (!apiKey) { statusEl.innerHTML = '<span style="color:#f85149">请先在"每日分析"页面配置API Key</span>'; return; }
 
-  const watchlist = JSON.parse(localStorage.getItem('stock_watchlist_' + currentUser.username) || '[]');
+  const watchlist = JSON.parse(localStorage.getItem('stock_watchlist_' + (currentUser?.username || 'guest')) || '[]');
   if (!watchlist.length) { statusEl.innerHTML = '<span style="color:#f85149">自选股为空，请先添加自选股</span>'; return; }
   statusEl.innerHTML = '⏳ 正在拉取实时行情和资金流数据...';
 

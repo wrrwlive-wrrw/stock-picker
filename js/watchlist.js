@@ -14,6 +14,8 @@ function saveWatchlist(list) {
   const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
   try {
     localStorage.setItem(key, JSON.stringify(list));
+    // 自动备份
+    if (typeof autoBackupUserData === 'function') autoBackupUserData();
     return true;
   } catch(e) {
     console.error('saveWatchlist failed:', e);
@@ -141,6 +143,13 @@ function renderWatchlist(el) {
       </div>` : ''}
       <div style="margin-top:8px;font-size:12px;color:#8b949e">
         💡 提示：成本价用于计算持仓盈亏，结合AI分析给出持有/卖出建议。点击"编辑"可设置目标价、止损价、选股方法。
+      </div>
+      <div style="margin-top:6px;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:11px;color:#8b949e">💾 数据安全：</span>
+        <button class="btn btn-sm" style="background:#238636;color:#fff;font-size:11px" onclick="exportFullBackup()">备份全部数据</button>
+        <button class="btn btn-sm" style="background:#1f6feb;color:#fff;font-size:11px" onclick="document.getElementById('backupFileInput').click()">恢复数据</button>
+        <input type="file" id="backupFileInput" accept=".json" style="display:none" onchange="importFullBackup(event)">
+        <span style="font-size:11px;color:#8b949e" id="backupStatus"></span>
       </div>
     </div>
     <div id="dailyReportArea"><div class="card"><p style="color:#58a6ff">正在拉取大盘数据...</p></div></div>
@@ -742,4 +751,80 @@ async function showStockDetail(code) {
       <button class="btn btn-blue" onclick="document.getElementById('stockDetailOverlay').remove();editWatchStock('${code}')">✏️ 编辑持仓</button>
     </div>
   `;
+}
+
+// === 数据备份与恢复 ===
+
+// 导出全部数据（自选股+报告+设置）
+function exportFullBackup() {
+  const username = currentUser?.username || 'guest';
+  const backup = {
+    version: 1,
+    exportTime: new Date().toISOString(),
+    username: username,
+    watchlist: JSON.parse(localStorage.getItem('stock_watchlist_' + username) || '[]'),
+    reports: JSON.parse(localStorage.getItem('stock_reports_' + username) || '[]'),
+    apiKey: localStorage.getItem('ai_api_key') || '',
+    autoReport: localStorage.getItem('stock_report_auto_' + username) || 'off',
+    accounts: JSON.parse(localStorage.getItem('stock_accounts') || '[]')
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'stock_picker_backup_' + username + '_' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  const st = document.getElementById('backupStatus');
+  if (st) st.textContent = '✅ 已导出备份文件';
+}
+
+// 导入恢复数据
+function importFullBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || !data.username) { alert('备份文件格式不正确'); return; }
+      const username = data.username;
+      // 恢复自选股
+      if (data.watchlist && Array.isArray(data.watchlist)) {
+        localStorage.setItem('stock_watchlist_' + username, JSON.stringify(data.watchlist));
+      }
+      // 恢复报告
+      if (data.reports && Array.isArray(data.reports)) {
+        localStorage.setItem('stock_reports_' + username, JSON.stringify(data.reports));
+      }
+      // 恢复API Key
+      if (data.apiKey) {
+        localStorage.setItem('ai_api_key', data.apiKey);
+      }
+      // 恢复自动生成设置
+      if (data.autoReport) {
+        localStorage.setItem('stock_report_auto_' + username, data.autoReport);
+      }
+      // 恢复账号列表
+      if (data.accounts && Array.isArray(data.accounts) && data.accounts.length) {
+        localStorage.setItem('stock_accounts', JSON.stringify(data.accounts));
+      }
+      // 如果是当前用户，更新currentUser并刷新
+      if (currentUser && currentUser.username === username) {
+        alert(`数据恢复成功！共恢复 ${data.watchlist?.length || 0} 只自选股，${data.reports?.length || 0} 份报告`);
+        renderWatchlist(document.getElementById('mainContent'));
+      } else {
+        alert(`数据已恢复到账号 "${username}"，请切换到该账号查看`);
+      }
+      // 自动备份恢复后的数据
+      if (typeof autoBackupUserData === 'function') autoBackupUserData();
+    } catch(err) {
+      alert('恢复失败：文件解析错误');
+      console.error('importFullBackup error:', err);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }

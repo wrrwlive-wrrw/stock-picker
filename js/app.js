@@ -124,8 +124,67 @@ window.onload = function() {
   updateMarketTime();
   setInterval(updateMarketTime, 1000);
   const saved = localStorage.getItem('stock_current_user');
-  if (saved) { currentUser = JSON.parse(saved); showMain(); }
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      if (currentUser && currentUser.username) {
+        showMain();
+      } else {
+        currentUser = null;
+      }
+    } catch(e) {
+      console.error('用户数据解析失败，尝试恢复...', e);
+      currentUser = null;
+      localStorage.removeItem('stock_current_user');
+      // 尝试从备份恢复
+      tryAutoRecoverData();
+    }
+  }
 };
+
+// 自动尝试恢复数据
+function tryAutoRecoverData() {
+  try {
+    const backup = localStorage.getItem('stock_data_backup');
+    if (backup) {
+      const data = JSON.parse(backup);
+      if (data && data.username) {
+        // 恢复用户数据
+        localStorage.setItem('stock_current_user', JSON.stringify({username: data.username, name: data.name, role: data.role}));
+        if (data.watchlist) localStorage.setItem('stock_watchlist_' + data.username, JSON.stringify(data.watchlist));
+        if (data.reports) localStorage.setItem('stock_reports_' + data.username, JSON.stringify(data.reports));
+        if (data.apiKey) localStorage.setItem('ai_api_key', data.apiKey);
+        alert('数据已从备份恢复，请重新登录');
+      }
+    }
+  } catch(e) {
+    console.error('自动恢复失败', e);
+  }
+}
+
+// 自动备份用户数据到localStorage（每次保存自选股时触发）
+function autoBackupUserData() {
+  if (!currentUser || !currentUser.username) return;
+  try {
+    const key = 'stock_watchlist_' + currentUser.username;
+    const watchlist = JSON.parse(localStorage.getItem(key) || '[]');
+    const reportKey = 'stock_reports_' + currentUser.username;
+    const reports = JSON.parse(localStorage.getItem(reportKey) || '[]');
+    const apiKey = localStorage.getItem('ai_api_key') || '';
+    const backup = {
+      username: currentUser.username,
+      name: currentUser.name,
+      role: currentUser.role,
+      watchlist: watchlist,
+      reports: reports.slice(0, 10), // 只备份最近10份报告
+      apiKey: apiKey,
+      backupTime: new Date().toISOString()
+    };
+    localStorage.setItem('stock_data_backup', JSON.stringify(backup));
+  } catch(e) {
+    console.error('自动备份失败', e);
+  }
+}
 
 // 用户管理（仅管理员可见）
 function renderUserManage(el) {
