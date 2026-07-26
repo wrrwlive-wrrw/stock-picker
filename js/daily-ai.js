@@ -261,7 +261,7 @@ async function generateDailyAnalysis() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
-        model: AI_MODEL, temperature: 0.4, max_tokens: 10000,
+        model: AI_MODEL, temperature: 0.4, max_tokens: 12000,
         enable_thinking: false,
         messages: [
           { role: 'system', content: getSystemPrompt() },
@@ -309,7 +309,7 @@ function getSystemPrompt() {
 2. 必须结合传入的真实实时行情数据（最新价格、涨跌幅、PE、资金流）做研判
 3. 分析框架：宏观周期定位→大盘技术面→资金面→行业轮动→个股精选
 4. 板块联动逻辑：美股AI→A股算力/半导体；油价→石化/军工；汇率→出口链；降息→券商/成长
-5. 每次推荐恰好15只股票，给出：五星评级、买入理由、风险点、买入区间、目标价、止损价
+5. 每次推荐恰好20只股票，给出：五星评级、买入理由、风险点、买入区间、目标价、止损价
 6. 预测要有逻辑链：原因→推导→结论→概率
 7. 风险评估要量化：下跌概率、最大回撤、风险收益比
 8. 使用markdown格式，##标题分段
@@ -359,9 +359,9 @@ ${mkt}${wl}
 - 主线逻辑、催化事件、核心龙头（给代码）、跟涨标的
 - 板块持续性判断（短炒/中线/长线）
 
-## 五、今日推荐15只股票（机构级评级）
+## 五、今日推荐20只股票（机构级评级）
 | 序号 | 代码 | 名称 | 主线 | 五星评级 | 买入理由 | 风险点 | 主力资金 | 趋势 | 买入区间 | 目标价 | 止损价 |
-要求：恰好15只A股，代码规范，高估值/下跌通道/主力撤退的标注"回避"
+要求：恰好20只A股，代码规范，覆盖不同主线板块（科技/消费/新能源/金融/医药等），高估值/下跌通道/主力撤退的标注"回避"
 
 ## 六、风险事件日历
 ## 七、今日操作策略（仓位+攻防方向）
