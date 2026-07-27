@@ -1,5 +1,5 @@
 // AI选股智能体模块 — 根据股票代码进行全面深度分析
-// 复用 daily-ai.js 的 AI_API_URL, AI_MODEL, getAIKey()
+// 复用 daily-ai.js 的 getAIConfig(), getAIKey()
 
 function renderAIAgent(el) {
   const savedKey = getAIKey();
@@ -182,19 +182,21 @@ async function startAIAnalysis() {
   const watchStock2 = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
   const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock2);
   try {
-    const res = await fetch(AI_API_URL, {
+    const aiCfg = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+    const body = {
+      model: aiCfg.model,
+      temperature: 0.4,
+      max_tokens: 12000,
+      messages: [
+        { role: 'system', content: getStockAgentSystemPrompt() },
+        { role: 'user', content: prompt }
+      ]
+    };
+    if (typeof getAIProvider === 'function' && getAIProvider() === 'siliconflow') body.enable_thinking = false;
+    const res = await fetch(aiCfg.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({
-        model: 'Qwen/Qwen3-32B',
-        temperature: 0.4,
-        max_tokens: 12000,
-        enable_thinking: false,
-        messages: [
-          { role: 'system', content: getStockAgentSystemPrompt() },
-          { role: 'user', content: prompt }
-        ]
-      })
+      body: JSON.stringify(body)
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -271,19 +273,21 @@ async function startAIAnalysisDirect(code, name) {
   const watchStock = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
   const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock);
   try {
-    const res = await fetch(AI_API_URL, {
+    const aiCfg2 = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+    const body2 = {
+      model: aiCfg2.model,
+      temperature: 0.4,
+      max_tokens: 12000,
+      messages: [
+        { role: 'system', content: getStockAgentSystemPrompt() },
+        { role: 'user', content: prompt }
+      ]
+    };
+    if (typeof getAIProvider === 'function' && getAIProvider() === 'siliconflow') body2.enable_thinking = false;
+    const res = await fetch(aiCfg2.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        temperature: 0.4,
-        max_tokens: 12000,
-        enable_thinking: false,
-        messages: [
-          { role: 'system', content: getStockAgentSystemPrompt() },
-          { role: 'user', content: prompt }
-        ]
-      })
+      body: JSON.stringify(body2)
     });
     if (!res.ok) {
       const errText = await res.text();

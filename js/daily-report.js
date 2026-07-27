@@ -251,18 +251,20 @@ ${stockStr}
 }
 
 async function callReportAI(apiKey, userPrompt) {
-  const resp = await fetch(AI_API_URL, {
+  const aiCfg = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+  const body = {
+    model: aiCfg.model,
+    messages: [
+      { role: 'system', content: '你是一位专业的A股投研分析师，擅长技术分析、基本面分析和市场情绪判断。请提供专业、客观、有数据支撑的分析报告。' },
+      { role: 'user', content: userPrompt }
+    ],
+    temperature: 0.4,
+    max_tokens: 8000
+  };
+  const resp = await fetch(aiCfg.url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      messages: [
-        { role: 'system', content: '你是一位专业的A股投研分析师，擅长技术分析、基本面分析和市场情绪判断。请提供专业、客观、有数据支撑的分析报告。' },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0.4,
-      max_tokens: 8000
-    })
+    body: JSON.stringify(body)
   });
   if (!resp.ok) throw new Error('AI接口返回错误: ' + resp.status);
   const data = await resp.json();

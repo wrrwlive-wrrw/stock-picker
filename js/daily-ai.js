@@ -1,6 +1,36 @@
 // 每日AI智能分析模块
-const AI_API_URL = 'https://api.siliconflow.cn/v1/chat/completions';
-const AI_MODEL = 'Qwen/Qwen3-32B';
+
+// AI供应商配置
+const AI_PROVIDERS = {
+  siliconflow: {
+    name: '硅基流动 SiliconFlow',
+    url: 'https://api.siliconflow.cn/v1/chat/completions',
+    model: 'Qwen/Qwen3-32B',
+    keyPlaceholder: '粘贴sk-开头的API Key',
+    keyHint: '免费申请硅基流动Key',
+    keyUrl: 'https://cloud.siliconflow.cn/account/ak'
+  },
+  zhipu: {
+    name: '智谱AI (GLM)',
+    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model: 'GLM-4-Flash',
+    keyPlaceholder: '粘贴智谱API Key',
+    keyHint: '免费申请智谱API Key',
+    keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys'
+  }
+};
+
+function getAIProvider() {
+  return localStorage.getItem('ai_provider') || 'siliconflow';
+}
+function setAIProvider(p) {
+  localStorage.setItem('ai_provider', p);
+}
+function getAIConfig() {
+  const provider = getAIProvider();
+  const cfg = AI_PROVIDERS[provider] || AI_PROVIDERS.siliconflow;
+  return { provider, url: cfg.url, model: cfg.model, ...cfg };
+}
 
 function getAIKey() {
   return localStorage.getItem('ai_api_key') || '';
@@ -75,17 +105,25 @@ function renderDailyAI(el) {
   const cached = getDailyCache(today);
   const savedKey = getAIKey();
   const keyMask = savedKey ? savedKey.slice(0,6)+'****'+savedKey.slice(-4) : '未配置';
+  const cfg = getAIConfig();
   el.innerHTML = `
     <div class="card">
       <div class="card-title">🤖 每日智能分析</div>
-      <p style="color:#8b949e;font-size:13px">AI自动分析大盘走势、自选股风险、买卖信号，推荐主线股票</p>
+      <p style="color:#8b949e;font-size:13px">AI自动分析大盘走势、自选股风险、买卖信号，推荐20只主线股票</p>
       <div style="margin-top:8px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:12px;color:#8b949e">AI供应商：</span>
+          <select id="aiProviderSelect" onchange="switchAIProvider()" style="padding:5px 8px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
+            <option value="siliconflow" ${getAIProvider()==='siliconflow'?'selected':''}>硅基流动 SiliconFlow (Qwen3-32B)</option>
+            <option value="zhipu" ${getAIProvider()==='zhipu'?'selected':''}>智谱AI (GLM-4-Flash)</option>
+          </select>
+        </div>
         <div style="font-size:12px;color:#8b949e;margin-bottom:6px">
-          当前API Key：<span style="color:#58a6ff">${keyMask}</span>
-          （<a href="https://cloud.siliconflow.cn/account/ak" target="_blank" style="color:#58a6ff">免费申请硅基流动Key</a>）
+          当前：<span style="color:#58a6ff">${cfg.name}</span> | Key：<span style="color:#58a6ff">${keyMask}</span>
+          （<a href="${cfg.keyUrl}" target="_blank" style="color:#58a6ff">${cfg.keyHint}</a>）
         </div>
         <div style="display:flex;gap:6px">
-          <input type="password" id="aiKeyInput" placeholder="粘贴sk-开头的API Key" style="flex:1;padding:6px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
+          <input type="password" id="aiKeyInput" placeholder="${cfg.keyPlaceholder}" style="flex:1;padding:6px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
           <button class="btn btn-blue btn-sm" onclick="setAIKey()">保存Key</button>
         </div>
       </div>
@@ -99,9 +137,15 @@ function renderDailyAI(el) {
     <div id="watchlistSignalArea"></div>
     <div id="dailyResult">${cached ? cached : ''}</div>
   `;
-  // 异步加载大盘概览和自选股信号（不影响主体渲染）
   loadMarketOverview();
   loadWatchlistSignals();
+}
+
+function switchAIProvider() {
+  const sel = document.getElementById('aiProviderSelect');
+  if (!sel) return;
+  setAIProvider(sel.value);
+  renderDailyAI(document.getElementById('mainContent'));
 }
 
 // 加载大盘实时概览
@@ -210,7 +254,10 @@ async function loadWatchlistSignals() {
 function setAIKey() {
   const v = document.getElementById('aiKeyInput').value.trim();
   if (!v) { alert('请输入API Key'); return; }
-  if (!v.startsWith('sk-')) { alert('API Key格式不正确，应以sk-开头'); return; }
+  const provider = getAIProvider();
+  if (provider === 'siliconflow' && !v.startsWith('sk-')) {
+    alert('硅基流动Key应以sk-开头'); return;
+  }
   saveAIKey(v);
   if (typeof autoBackupUserData === 'function') autoBackupUserData();
   alert('API Key已保存');
@@ -257,17 +304,21 @@ async function generateDailyAnalysis() {
   const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary, watchlist.length);
 
   try {
-    const res = await fetch(AI_API_URL, {
+    const aiCfg = getAIConfig();
+    status.textContent = `使用 ${aiCfg.name} 分析中...`;
+    const body = {
+      model: aiCfg.model, temperature: 0.4, max_tokens: 12000,
+      messages: [
+        { role: 'system', content: getSystemPrompt() },
+        { role: 'user', content: prompt }
+      ]
+    };
+    // 硅基流动支持enable_thinking，智谱不支持
+    if (getAIProvider() === 'siliconflow') body.enable_thinking = false;
+    const res = await fetch(aiCfg.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({
-        model: AI_MODEL, temperature: 0.4, max_tokens: 12000,
-        enable_thinking: false,
-        messages: [
-          { role: 'system', content: getSystemPrompt() },
-          { role: 'user', content: prompt }
-        ]
-      })
+      body: JSON.stringify(body)
     });
     if (!res.ok) {
       const errText = await res.text();

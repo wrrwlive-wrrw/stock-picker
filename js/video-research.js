@@ -189,11 +189,12 @@ async function doResearchSummarize() {
 
   try {
     const prompt = buildResearchPrompt(_lastSearchKeyword, _lastSearchVideos, _lastSearchPosts);
-    const resp = await fetch(AI_API_URL, {
+    const aiCfg = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+    const resp = await fetch(aiCfg.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({
-        model: AI_MODEL,
+        model: aiCfg.model,
         messages: [
           { role: 'system', content: '你是专业的股票舆情分析师，擅长从多个信息源中提取核心观点并给出综合判断。' },
           { role: 'user', content: prompt }

@@ -765,6 +765,7 @@ function exportFullBackup() {
     watchlist: JSON.parse(localStorage.getItem('stock_watchlist_' + username) || '[]'),
     reports: JSON.parse(localStorage.getItem('stock_reports_' + username) || '[]'),
     apiKey: localStorage.getItem('ai_api_key') || '',
+    aiProvider: localStorage.getItem('ai_provider') || 'siliconflow',
     autoReport: localStorage.getItem('stock_report_auto_' + username) || 'off',
     accounts: JSON.parse(localStorage.getItem('stock_accounts') || '[]')
   };
@@ -802,6 +803,10 @@ function importFullBackup(event) {
       // 恢复API Key
       if (data.apiKey) {
         localStorage.setItem('ai_api_key', data.apiKey);
+      }
+      // 恢复AI供应商
+      if (data.aiProvider) {
+        localStorage.setItem('ai_provider', data.aiProvider);
       }
       // 恢复自动生成设置
       if (data.autoReport) {
