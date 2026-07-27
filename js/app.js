@@ -90,11 +90,28 @@ function renderSidebar() {
   ).join('');
 }
 
+// 移动端侧边栏切换
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (!sidebar || !overlay) return;
+  const isOpen = sidebar.classList.contains('open');
+  sidebar.classList.toggle('open');
+  overlay.classList.toggle('show');
+}
+
 // 路由
 function navigate(page) {
   document.querySelectorAll('.menu-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
+  // 移动端导航后关闭侧边栏
+  if (window.innerWidth <= 768) {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('show');
+  }
   const content = document.getElementById('mainContent');
   switch(page) {
     case 'market': renderMarket(content); break;
@@ -141,6 +158,13 @@ window.onload = function() {
     }
   }
 };
+
+// 注册Service Worker（PWA离线缓存）
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
 
 // 自动尝试恢复数据
 function tryAutoRecoverData() {

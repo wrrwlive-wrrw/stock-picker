@@ -2,8 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="智能选股">
+  <meta name="description" content="智能选股指导系统 — AI驱动的A股投资分析平台">
   <title>智能选股指导系统</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -29,8 +36,9 @@
 
   <!-- 顶部导航 -->
   <nav class="top-nav" id="topNav" style="display:none">
-    <div class="nav-left">
-      <span class="logo">📈 智能选股指导</span>
+    <div class="nav-left" style="display:flex;align-items:center">
+      <button class="menu-toggle" id="menuToggle" onclick="toggleSidebar()">☰</button>
+      <span class="logo">📈 智能选股</span>
     </div>
     <div class="nav-right">
       <span class="market-time" id="marketTime"></span>
@@ -38,6 +46,9 @@
       <button class="btn-logout" onclick="doLogout()">退出</button>
     </div>
   </nav>
+
+  <!-- 侧边栏遮罩 -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
   <!-- 主布局 -->
   <div class="app-container" id="appContainer" style="display:none">

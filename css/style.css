@@ -167,10 +167,147 @@ body { font-family:'Microsoft YaHei','PingFang SC',sans-serif; background:#0d111
 .buy-risk-item { padding:8px; margin:6px 0; background:#0d1117; border-left:3px solid #f0883e; border-radius:4px; font-size:12px; }
 .trading-rule { padding:10px; margin:6px 0; background:#0d1117; border-left:4px solid #58a6ff; border-radius:4px; }
 
-/* 响应式 */
+/* 响应式 — 移动端全面适配 */
 @media(max-width:768px) {
-  .sidebar { width:60px; } .menu-item { padding:10px 8px; font-size:11px; text-align:center; }
-  .content { margin-left:60px; padding:12px; }
-  .index-grid { grid-template-columns:repeat(2,1fr); }
-  .factor-grid { grid-template-columns:1fr; }
+  .top-nav {
+    padding: 0 12px;
+    height: 48px;
+  }
+  .nav-left .logo { font-size: 14px; }
+  .nav-right { gap: 6px; }
+  .market-time { font-size: 10px; }
+  #userInfo { font-size: 11px; margin-left: 6px !important; }
+  .btn-logout { padding: 4px 8px; font-size: 10px; }
+
+  /* 汉堡菜单按钮 */
+  .menu-toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: none;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #e6e6e6;
+    font-size: 18px;
+    cursor: pointer;
+    margin-right: 8px;
+  }
+
+  /* 侧边栏改为抽屉式 */
+  .sidebar {
+    position: fixed;
+    top: 48px;
+    left: -220px;
+    width: 200px;
+    z-index: 200;
+    transition: left 0.25s ease;
+    box-shadow: none;
+  }
+  .sidebar.open {
+    left: 0;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    top: 48px;
+    background: rgba(0,0,0,0.5);
+    z-index: 199;
+  }
+  .sidebar-overlay.show { display: block; }
+
+  .menu-item {
+    padding: 14px 18px;
+    font-size: 14px;
+    text-align: left;
+    border-left: 3px solid transparent;
+  }
+
+  /* 内容区 */
+  .content {
+    margin-left: 0;
+    padding: 12px;
+    padding-bottom: 80px;
+  }
+
+  /* 登录页 */
+  .login-box {
+    width: 90%;
+    max-width: 360px;
+    padding: 28px 20px;
+  }
+  .login-header h1 { font-size: 18px; }
+
+  /* 卡片 */
+  .card { padding: 14px; margin-bottom: 12px; border-radius: 8px; }
+  .card-title { font-size: 14px; margin-bottom: 10px; }
+
+  /* 指数网格 */
+  .index-grid { grid-template-columns: 1fr; gap: 8px; }
+  .index-card { padding: 12px; }
+  .index-value { font-size: 18px; }
+
+  /* 因子网格 */
+  .factor-grid { grid-template-columns: 1fr; }
+
+  /* 表格横向滚动 */
+  .data-table { font-size: 12px; min-width: 600px; }
+  div[style*="overflow-x:auto"] {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 工具栏 */
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .toolbar input, .toolbar select {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .toolbar .btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  /* 弹窗 */
+  .modal-box {
+    width: 95%;
+    max-height: 85vh;
+    padding: 20px;
+  }
+  #stockDetailModal {
+    width: 95%;
+    max-height: 85vh;
+    padding: 16px;
+  }
+
+  /* 按钮触控优化 */
+  .btn { min-height: 40px; font-size: 14px; }
+  .btn-sm { min-height: 32px; font-size: 12px; padding: 6px 12px; }
+
+  /* K线图 */
+  .chart-container { height: 260px; }
+
+  /* 筛选标签 */
+  .btn-sm[onclick*="filterWatchlist"] {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  /* 自选股表格操作列 */
+  .data-table td:last-child { white-space: nowrap; }
+  .data-table td:last-child .btn { padding: 6px 8px; font-size: 11px; }
+
+  /* 弹窗内按钮组 */
+  #stockDetailModal .btn { font-size: 13px; padding: 8px 14px; }
 }
+
+/* 桌面端隐藏汉堡菜单 */
+.menu-toggle { display: none; }
+.sidebar-overlay { display: none; }
