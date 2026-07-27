@@ -33,6 +33,14 @@ const AI_PROVIDERS = {
     keyPlaceholder: '粘贴sk-or-开头的API Key',
     keyHint: '免费申请OpenRouter Key',
     keyUrl: 'https://openrouter.ai/keys'
+  },
+  bailian: {
+    name: '阿里云百炼 (通义千问)',
+    url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    model: 'qwen-plus',
+    keyPlaceholder: '粘贴sk-开头的百炼API Key',
+    keyHint: '免费申请百炼Key',
+    keyUrl: 'https://bailian.console.aliyun.com/'
   }
 };
 
@@ -131,6 +139,7 @@ function renderDailyAI(el) {
           <span style="font-size:12px;color:#8b949e">AI供应商：</span>
           <select id="aiProviderSelect" onchange="switchAIProvider()" style="padding:5px 8px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
             <option value="siliconflow" ${getAIProvider()==='siliconflow'?'selected':''}>硅基流动 (Qwen3-32B)</option>
+            <option value="bailian" ${getAIProvider()==='bailian'?'selected':''}>阿里云百炼 (通义千问)</option>
             <option value="zhipu" ${getAIProvider()==='zhipu'?'selected':''}>智谱AI (GLM-4-Flash)</option>
             <option value="groq" ${getAIProvider()==='groq'?'selected':''}>Groq (Llama-3.3-70B)</option>
             <option value="openrouter" ${getAIProvider()==='openrouter'?'selected':''}>OpenRouter (多模型免费)</option>
