@@ -152,7 +152,9 @@ function renderDailyAI(el) {
         <div style="display:flex;gap:6px">
           <input type="password" id="aiKeyInput" placeholder="${cfg.keyPlaceholder}" style="flex:1;padding:6px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
           <button class="btn btn-blue btn-sm" onclick="setAIKey()">保存Key</button>
+          <button class="btn btn-sm" style="background:#f0883e;color:#fff" onclick="testAIConnection()">测试连接</button>
         </div>
+        <div id="aiTestResult" style="margin-top:6px;font-size:12px"></div>
       </div>
       <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="generateDailyAnalysis()" id="aiBtn">生成今日分析</button>
@@ -302,6 +304,53 @@ function setAIKey() {
   if (typeof autoBackupUserData === 'function') autoBackupUserData();
   alert('API Key已保存');
   renderDailyAI(document.getElementById('mainContent'));
+}
+
+// 测试AI连接
+async function testAIConnection() {
+  const resultEl = document.getElementById('aiTestResult');
+  if (!resultEl) return;
+  const inputEl = document.getElementById('aiKeyInput');
+  const key = (inputEl?.value || '').trim() || getAIKey();
+  if (!key) { resultEl.innerHTML = '<span style="color:#ea3943">请先输入或保存API Key</span>'; return; }
+  const cfg = getAIConfig();
+  resultEl.innerHTML = `<span style="color:#d29922">⏳ 正在测试 ${cfg.name} 连接...</span>`;
+  const startTime = Date.now();
+  try {
+    const body = {
+      model: cfg.model,
+      messages: [{ role: 'user', content: '回复"OK"' }],
+      max_tokens: 10
+    };
+    if (getAIProvider() === 'siliconflow') body.enable_thinking = false;
+    const resp = await fetch(cfg.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000)
+    });
+    const elapsed = Date.now() - startTime;
+    if (resp.ok) {
+      const data = await resp.json();
+      const reply = data.choices?.[0]?.message?.content || '';
+      const usage = data.usage || {};
+      resultEl.innerHTML = `<span style="color:#16c784">✅ 连接成功 (${elapsed}ms)</span> — 模型: <span style="color:#58a6ff">${cfg.model}</span> | 回复: "${reply.slice(0,30)}" ${usage.total_tokens ? '| Token消耗: '+usage.total_tokens : ''}`;
+    } else {
+      const errText = await resp.text().catch(() => '');
+      let errMsg = `HTTP ${resp.status}`;
+      if (resp.status === 401) errMsg = 'API Key无效或已过期';
+      else if (resp.status === 429) errMsg = '请求频率超限，请稍后重试';
+      else if (resp.status === 403) errMsg = 'API Key权限不足';
+      else if (resp.status === 404) errMsg = '模型不存在，请检查供应商选择';
+      resultEl.innerHTML = `<span style="color:#ea3943">❌ 连接失败: ${errMsg}</span>${errText ? '<br><span style="color:#8b949e;font-size:11px">'+errText.slice(0,120)+'</span>' : ''}`;
+    }
+  } catch(e) {
+    const elapsed = Date.now() - startTime;
+    let errMsg = e.message || '未知错误';
+    if (e.name === 'TimeoutError') errMsg = '连接超时(15s)，请检查网络或代理';
+    else if (e.name === 'TypeError') errMsg = '网络错误，可能存在CORS限制';
+    resultEl.innerHTML = `<span style="color:#ea3943">❌ 连接失败 (${elapsed}ms): ${errMsg}</span>`;
+  }
 }
 
 function showFallbackNow() {
