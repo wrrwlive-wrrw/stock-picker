@@ -186,7 +186,7 @@ async function startAIAnalysis() {
     const body = {
       model: aiCfg.model,
       temperature: 0.4,
-      max_tokens: 12000,
+      max_tokens: 6000,
       messages: [
         { role: 'system', content: getStockAgentSystemPrompt() },
         { role: 'user', content: prompt }
@@ -200,11 +200,13 @@ async function startAIAnalysis() {
     });
     if (!res.ok) {
       const errText = await res.text();
+      console.error('AI API错误', res.status, errText);
       let errMsg = '状态码 ' + res.status;
-      if (res.status === 401) errMsg = 'API Key无效或已过期';
+      if (res.status === 401) errMsg = 'API Key无效或已过期（请重新保存Key）';
       else if (res.status === 429) errMsg = '调用频率超限，请稍后再试';
       else if (res.status === 403) errMsg = 'API Key权限不足或余额不足';
-      throw new Error(errMsg + ' — ' + errText.slice(0,120));
+      else if (res.status === 400) errMsg = '请求参数错误：' + errText.slice(0,100);
+      throw new Error(errMsg + (errText ? ' — ' + errText.slice(0,150) : ''));
     }
     const data = await res.json();
     let text = data.choices?.[0]?.message?.content || '';
@@ -277,7 +279,7 @@ async function startAIAnalysisDirect(code, name) {
     const body2 = {
       model: aiCfg2.model,
       temperature: 0.4,
-      max_tokens: 12000,
+      max_tokens: 6000,
       messages: [
         { role: 'system', content: getStockAgentSystemPrompt() },
         { role: 'user', content: prompt }
@@ -291,8 +293,9 @@ async function startAIAnalysisDirect(code, name) {
     });
     if (!res.ok) {
       const errText = await res.text();
+      console.error('AI API错误', res.status, errText);
       let errMsg = '状态码 ' + res.status;
-      if (res.status === 401) errMsg = 'API Key无效或已过期';
+      if (res.status === 401) errMsg = 'API Key无效或已过期（请重新保存Key）';
       else if (res.status === 429) errMsg = '调用频率超限，请稍后再试';
       else if (res.status === 403) errMsg = 'API Key权限不足';
       throw new Error(errMsg);

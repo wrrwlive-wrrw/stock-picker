@@ -421,7 +421,7 @@ async function generateDailyAnalysis() {
     const aiCfg = getAIConfig();
     status.textContent = `使用 ${aiCfg.name} 分析中...`;
     const body = {
-      model: aiCfg.model, temperature: 0.4, max_tokens: 12000,
+      model: aiCfg.model, temperature: 0.4, max_tokens: 6000,
       messages: [
         { role: 'system', content: getSystemPrompt() },
         { role: 'user', content: prompt }
