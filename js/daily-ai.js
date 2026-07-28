@@ -79,8 +79,8 @@ async function fetchWatchlistQuotes() {
   watchlist.forEach(s => {
     if (quotesMap[s.code]) quotes[s.code] = quotesMap[s.code];
   });
-  // 拉取资金流向（逐个，东方财富不支持批量）
-  const capFetches = watchlist.map(async s => {
+  // 拉取资金流向（串行，每请求间隔300ms避免代理429限流）
+  for (const s of watchlist) {
     try {
       const capData = await fetchEMCapitalFlow(s.code);
       if (capData && capData.length) {
@@ -90,8 +90,8 @@ async function fetchWatchlistQuotes() {
         quotes[s.code].capitalTrend = capData.slice(-5);
       }
     } catch(e) {}
-  });
-  await Promise.allSettled(capFetches);
+    await new Promise(r => setTimeout(r, 300));
+  }
   return { list: watchlist, quotes };
 }
 

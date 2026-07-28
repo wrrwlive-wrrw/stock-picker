@@ -304,23 +304,27 @@ async function doGenerateWatchlistReport() {
   if (!watchlist.length) { statusEl.innerHTML = '<span style="color:#f85149">自选股为空，请先添加自选股</span>'; return; }
   statusEl.innerHTML = '⏳ 正在拉取实时行情和资金流数据...';
 
-  // 并行拉取所有自选股实时行情+资金流
+  // 批量拉取所有股票行情（1次请求）
+  const codes = watchlist.map(s => s.code);
+  let quotesMap = {};
+  try {
+    quotesMap = await fetchAStockQuotesBatch(codes);
+  } catch(e) { console.warn('批量行情失败', e); }
+
+  // 串行拉取资金流（每请求间隔300ms避免代理429限流）
   const quotes = {};
-  const capFetches = watchlist.map(async s => {
+  for (let i = 0; i < watchlist.length; i++) {
+    const s = watchlist[i];
+    statusEl.innerHTML = `⏳ 拉取资金流数据... (${i+1}/${watchlist.length}) ${s.name}`;
+    const quote = quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null;
+    let capFlow = null;
     try {
-      const [quote, capFlow] = await Promise.all([
-        fetchAStockQuote(s.code).catch(() => null),
-        fetchEMCapitalFlow(s.code).catch(() => null)
-      ]);
-      quotes[s.code] = {
-        quote: quote || SAMPLE_STOCKS[s.code] || null,
-        capFlow: capFlow && capFlow.length ? capFlow : null
-      };
-    } catch(e) {
-      quotes[s.code] = { quote: SAMPLE_STOCKS[s.code] || null, capFlow: null };
-    }
-  });
-  await Promise.allSettled(capFetches);
+      capFlow = await fetchEMCapitalFlow(s.code);
+      if (!capFlow || !capFlow.length) capFlow = null;
+    } catch(e) {}
+    quotes[s.code] = { quote, capFlow };
+    await new Promise(r => setTimeout(r, 300));
+  }
   statusEl.innerHTML = '⏳ 实时数据已获取，AI分析中...';
 
   try {

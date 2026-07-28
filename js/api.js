@@ -8,11 +8,29 @@ const CORS_PROXIES = [
 ];
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
 
+// 重试fetch：最多重试2次，指数退避
+async function fetchWithRetry(url, options = {}, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
+      if (res.ok) return res;
+      if (res.status === 429 && i < retries) {
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+        continue;
+      }
+      return res;
+    } catch(e) {
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      else throw e;
+    }
+  }
+}
+
 // 带多代理fallback的fetch（支持GBK/GB2312编码）
 async function fetchWithProxy(url, encoding) {
   for (const proxy of CORS_PROXIES) {
     try {
-      const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
+      const res = await fetchWithRetry(proxy + encodeURIComponent(url));
       if (!res.ok) continue;
       if (encoding) {
         const buf = await res.arrayBuffer();
@@ -281,7 +299,7 @@ async function fetchEMIntradayFlow(code) {
           super: parseFloat(p[5] || 0) / 1e4
         };
       });
-      setCache(cacheKey, result, 60000);
+      setCache(cacheKey, result);
       return result;
     }
   } catch(e) { console.warn('分时资金流向API失败', e); }

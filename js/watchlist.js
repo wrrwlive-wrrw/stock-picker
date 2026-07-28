@@ -208,16 +208,16 @@ async function refreshWatchlistRealTime() {
   try {
     quotesMap = await fetchAStockQuotesBatch(codes);
   } catch(e) { console.warn('批量行情失败', e); }
-  // 逐个拉取资金流（东方财富API不支持批量）
-  const capFetches = list.map(async s => {
+  // 串行拉取资金流（每请求间隔300ms避免代理429限流）
+  for (const s of list) {
     try {
       const capFlow = await fetchEMCapitalFlow(s.code);
       results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow };
     } catch(e) {
       results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow: null };
     }
-  });
-  await Promise.allSettled(capFetches);
+    await new Promise(r => setTimeout(r, 300));
+  }
   const tableCard = document.getElementById('watchlistTableCard');
   if (tableCard) {
     tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);
@@ -617,6 +617,9 @@ async function showStockDetail(code) {
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
   document.body.appendChild(overlay);
+  // ESC键关闭弹窗
+  overlay._escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', overlay._escHandler); } };
+  document.addEventListener('keydown', overlay._escHandler);
 
   // 弹窗主体
   const modal = document.createElement('div');
@@ -707,12 +710,14 @@ async function showStockDetail(code) {
   }
 
   modal.innerHTML = `
+    <div id="modalCloseTop" style="position:sticky;top:0;z-index:10;display:flex;justify-content:flex-end;margin:-24px -24px 12px;padding:8px 16px;background:#0d1117;border-bottom:1px solid #30363d;border-radius:12px 12px 0 0">
+      <button onclick="document.getElementById('stockDetailOverlay').remove()" style="background:#da3633;color:#fff;border:none;padding:6px 20px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold">✕ 关闭</button>
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <div>
         <h2 style="margin:0;color:#e6e6e6">${stockName}</h2>
         <span style="color:#8b949e;font-size:13px">${code}</span>
       </div>
-      <button onclick="document.getElementById('stockDetailOverlay').remove()" style="background:#da3633;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">关闭</button>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
