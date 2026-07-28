@@ -118,17 +118,21 @@ function viewReportDetail(id) {
   const r = reports.find(x => x.id === id);
   if (!r) return;
   document.getElementById('reportDetailModal').innerHTML = `
-    <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.innerHTML=''">
+    <div id="reportOverlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)closeReportDetail()">
       <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;width:90%;max-width:800px;max-height:80vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="color:#e6e6e6;margin:0">${r.title}</h3>
-          <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="this.closest('[style*=fixed]').innerHTML=''">关闭</button>
+          <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="closeReportDetail()">关闭</button>
         </div>
         <div style="color:#8b949e;font-size:12px;margin-bottom:12px">生成时间：${new Date(r.createTime).toLocaleString('zh-CN')}</div>
         <div style="color:#c9d1d9;line-height:1.7;font-size:14px">${r.content}</div>
       </div>
     </div>
   `;
+}
+function closeReportDetail() {
+  const overlay = document.getElementById('reportOverlay');
+  if (overlay) overlay.remove();
 }
 
 async function doGenerateMarketReport() {
