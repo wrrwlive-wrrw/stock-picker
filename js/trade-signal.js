@@ -175,6 +175,160 @@ function getCompanyFundamentals(code) {
   return data[code] || null;
 }
 
+// === 主力出货检测系统 ===
+
+// 四大内外盘实战用法分析
+function analyzeInOutMarket(capFlow, price, pct) {
+  if (!capFlow || !capFlow.length) return { signals: [], score: 0, desc: '无资金流数据' };
+  const signals = [];
+  let score = 0;
+  const latest = capFlow[capFlow.length - 1];
+  const prev = capFlow.length >= 2 ? capFlow[capFlow.length - 2] : null;
+  const recent3 = capFlow.slice(-3);
+
+  // 1. 内盘大于外盘 + 主力流出 = 主力出货
+  // 内盘（主动卖盘）= 大单+超大单流出，外盘（主动买盘）= 大单+超大单流入
+  const mainOut = latest.big < 0 || latest.super < 0;
+  const mainIn = latest.big > 0 && latest.super > 0;
+  if (mainOut && latest.main < -0.5) {
+    signals.push('⚠️ 内盘>外盘，主力主动卖出，出货迹象');
+    score += 25;
+  } else if (mainIn && latest.main > 0.5) {
+    signals.push('✅ 外盘>内盘，主力主动买入，吸筹迹象');
+    score -= 15;
+  }
+
+  // 2. 涨停板封单分析：大单封住但散户出逃 = 托单出货
+  if (pct > 9.5 && latest.small < -0.3) {
+    signals.push('🚨 涨停板但散户大举流出，疑似托单出货');
+    score += 30;
+  }
+
+  // 3. 高位放量+主力流出 = 天量天价出货
+  if (pct > 3 && latest.main < -1) {
+    signals.push('🚨 高位放量下跌，主力加速出货');
+    score += 30;
+  }
+
+  // 4. 连续3日主力流出递增 = 对倒出货
+  if (recent3.length >= 3) {
+    const flows = recent3.map(t => t.main);
+    if (flows[0] < 0 && flows[1] < 0 && flows[2] < 0 && flows[2] < flows[1] && flows[1] < flows[0]) {
+      signals.push('🚨 连续3日主力加速流出，对倒出货特征');
+      score += 35;
+    }
+  }
+
+  // 5. 尾盘拉升+次日低开概率高 = 尾盘诱多
+  const hour = new Date().getHours();
+  if (hour >= 14 && pct > 3 && latest.main < 0) {
+    signals.push('⚠️ 尾盘拉升但主力净流出，次日低开概率大');
+    score += 20;
+  }
+
+  // 6. 散户接盘+主力撤退 = 高位派发
+  const recentSmall = recent3.reduce((s, t) => s + (t.small || 0), 0);
+  const recentMain = recent3.reduce((s, t) => s + (t.main || 0), 0);
+  if (recentSmall > 0.5 && recentMain < -1) {
+    signals.push('🚨 散户接盘+主力撤退，典型高位派发');
+    score += 30;
+  }
+
+  return {
+    signals,
+    score: Math.min(score, 100),
+    desc: signals.length ? signals[0] : '暂无出货信号'
+  };
+}
+
+// 成交量异动分析
+function analyzeVolumeAnomaly(capFlow, price) {
+  if (!capFlow || capFlow.length < 3) return { status: 'normal', desc: '数据不足', score: 0 };
+  const signals = [];
+  let score = 0;
+  const recent = capFlow.slice(-5);
+
+  // 计算近5日主力净流入均值
+  const avgMain = recent.reduce((s, t) => s + (t.main || 0), 0) / recent.length;
+  const todayMain = capFlow[capFlow.length - 1].main || 0;
+
+  // 天量天价：价格新高 + 成交量暴增
+  if (todayMain < -2) {
+    signals.push('🔴 天量天价：主力单日流出超2亿，顶部特征');
+    score += 35;
+  } else if (todayMain < -1) {
+    signals.push('🟠 放量滞涨：主力流出超1亿，上涨乏力');
+    score += 20;
+  }
+
+  // 缩量下跌：主力流出但量能萎缩 = 阴跌
+  if (todayMain < 0 && Math.abs(todayMain) < Math.abs(avgMain) * 0.5 && avgMain < 0) {
+    signals.push('🟡 缩量阴跌：主力小幅流出，但量能萎缩');
+    score += 10;
+  }
+
+  // 底部放量：主力大举流入
+  if (todayMain > 1.5) {
+    signals.push('🟢 底部放量：主力大幅流入，可能启动');
+    score -= 20;
+  }
+
+  return {
+    status: score > 20 ? 'danger' : score > 10 ? 'warning' : 'normal',
+    desc: signals.length ? signals.join(' | ') : '成交量正常',
+    signals,
+    score
+  };
+}
+
+// 三大失效场景检测
+function detectFailureScenarios(capFlow, price, pct, turnover) {
+  const scenarios = [];
+  // 失效场景1：大盘系统性风险 — 个股分析失效
+  // 由marketCtx处理，这里检测极端行情
+  if (pct < -5) {
+    scenarios.push({ name: '系统性暴跌', desc: '个股跌幅>5%，技术分析失效，恐慌情绪主导', level: 'high' });
+  }
+
+  // 失效场景2：突发利空/黑天鹅 — 资金面分析失效
+  // 检测异常放量+暴跌
+  if (pct < -3 && turnover > 10) {
+    scenarios.push({ name: '黑天鹅事件', desc: '异常放量暴跌，疑似突发利空，资金面分析失效', level: 'high' });
+  }
+
+  // 失效场景3：主力假出货洗盘 — 资金面假信号
+  // 主力流出后快速回补
+  if (capFlow && capFlow.length >= 3) {
+    const today = capFlow[capFlow.length - 1];
+    const yesterday = capFlow[capFlow.length - 2];
+    if (yesterday.main < -1 && today.main > 1) {
+      scenarios.push({ name: '疑似洗盘', desc: '昨日主力流出今日回补，可能为洗盘动作', level: 'medium' });
+    }
+  }
+
+  return scenarios;
+}
+
+// 综合出货风险评估（用于信号面板显示）
+function assessMainForceRisk(capFlow, price, pct, turnover) {
+  const inOut = analyzeInOutMarket(capFlow, price, pct);
+  const volume = analyzeVolumeAnomaly(capFlow, price);
+  const failures = detectFailureScenarios(capFlow, price, pct, turnover);
+  const totalScore = inOut.score + volume.score;
+  const level = totalScore >= 50 ? 'critical' : totalScore >= 30 ? 'high' : totalScore >= 15 ? 'medium' : 'low';
+  const label = level === 'critical' ? '🔴 主力出货' : level === 'high' ? '🟠 疑似出货' : level === 'medium' ? '🟡 关注' : '🟢 安全';
+
+  return {
+    level,
+    label,
+    score: totalScore,
+    inOutSignals: inOut.signals,
+    volumeSignals: volume.signals || [],
+    volumeDesc: volume.desc,
+    failureScenarios: failures
+  };
+}
+
 // 综合暴雷风险预测（增强版）
 function predictRisk(stock, evaluation) {
   const risks = [];

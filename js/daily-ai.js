@@ -120,7 +120,16 @@ function buildWatchlistSummary(watchlist, quotes) {
     const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
     const pnl = costNum > 0 ? (((parseFloat(price) - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
     const methods = (s.methods || []).join('/') || '无';
-    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | 选股方法:${methods}`;
+    // 内外盘资金流详情（供AI分析主力出货）
+    let inOutDetail = '';
+    if (trend.length >= 2) {
+      const last3 = trend.slice(-3);
+      const bigIn = last3.reduce((s, t) => s + (t.big || 0), 0);
+      const superIn = last3.reduce((s, t) => s + (t.super || 0), 0);
+      const mainFlow = last3.reduce((s, t) => s + (t.main || 0), 0);
+      inOutDetail = `近3日主力累计${mainFlow > 0 ? '+' : ''}${mainFlow.toFixed(2)}亿(大单${bigIn > 0 ? '+' : ''}${bigIn.toFixed(2)}亿/超大单${superIn > 0 ? '+' : ''}${superIn.toFixed(2)}亿)`;
+    }
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | ${inOutDetail} | 选股方法:${methods}`;
   }).join('\n');
 }
 
@@ -221,57 +230,75 @@ async function loadWatchlistSignals() {
     const evaluations = list.map(s => {
       const q = quotes[s.code] || {};
       const enrichedStock = { ...s, price: q.price || s.price };
-      const rtData = { capitalFlow: q.capitalFlow || null, turnover: q.volume || null };
+      const capFlow = q.capitalTrend || [];
+      const latestCap = q.capitalFlow || null;
+      const rtData = { capitalFlow: latestCap, turnover: q.volume || null };
       const ev = evaluateWatchStock(enrichedStock, marketCtx, rtData);
-      return { stock: s, quote: q, evaluation: ev };
+      // 主力出货风险评估（用近5日资金流趋势）
+      const mfRisk = assessMainForceRisk(capFlow, parseFloat(q.price) || 0, parseFloat(q.pct) || 0, parseFloat(q.volume) || 0);
+      return { stock: s, quote: q, evaluation: ev, mfRisk };
     });
-    // 按风险排序：卖出>减仓>持有>买入
-    const order = { sell: 0, reduce: 1, hold: 2, buy: 3 };
-    evaluations.sort((a, b) => (order[a.evaluation.signal] || 2) - (order[b.evaluation.signal] || 2));
+    // 按主力出货风险+信号综合排序
+    const riskOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    const sigOrder = { sell: 0, reduce: 1, hold: 2, buy: 3 };
+    evaluations.sort((a, b) => {
+      const ra = riskOrder[a.mfRisk.level] ?? 3;
+      const rb = riskOrder[b.mfRisk.level] ?? 3;
+      if (ra !== rb) return ra - rb;
+      return (sigOrder[a.evaluation.signal] || 2) - (sigOrder[b.evaluation.signal] || 2);
+    });
     const sigMap = { sell: '🔴 清仓', reduce: '🟠 减仓', hold: '🟡 持有', buy: '🟢 买入' };
     const sigCls = { sell: 'down', reduce: 'down', hold: 'flat', buy: 'up' };
     const bgMap = { sell: '#2d0a0a', reduce: '#2d1f0a', hold: '#0d1117', buy: '#0a2d1a' };
+    const mfBg = { critical: '#3d0a0a', high: '#2d1a0a', medium: '#1a1a0a', low: '#0d1117' };
+    const mfLabel = { critical: '🔴 出货', high: '🟠 疑似', medium: '🟡 关注', low: '🟢 安全' };
+    const mfCls = { critical: 'down', high: 'down', medium: 'flat', low: 'up' };
+    // 收集所有失效场景
+    const allFailures = evaluations.flatMap(e => e.mfRisk.failureScenarios.map(f => ({ ...f, stock: e.stock.name })));
     area.innerHTML = `<div class="card" style="border-left:3px solid #f0883e">
       <div class="card-title">⚡ 自选股实时信号（${list.length}只）</div>
       <div style="font-size:12px;color:#8b949e;margin-bottom:8px">大盘环境：<span style="color:${marketCtx.color}">${marketCtx.desc}</span></div>
       <div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
-        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>主力资金</th><th>散户动向</th><th>操作建议</th></tr>
-        ${evaluations.map(({stock:s, quote:q, evaluation:ev}) => {
+        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>主力资金</th><th>主力出货</th><th>成交量</th><th>操作建议</th></tr>
+        ${evaluations.map(({stock:s, quote:q, evaluation:ev, mfRisk}) => {
           const pct = q.pct !== undefined ? q.pct : '—';
           const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
           const cap = ev.capital || {};
           const mainStr = cap.main || '—';
           const mainCls = (typeof mainStr === 'string' && mainStr.startsWith('+')) ? 'up' : 'down';
-          // 计算散户动向（近5日小单资金流）
-          const trend = q.capitalTrend || [];
-          let retailStr = '—', retailCls = 'flat', retailIcon = '';
-          if (trend.length >= 2) {
-            const recentSmall = trend.slice(-3).reduce((sum, t) => sum + (t.small || 0), 0);
-            const earlierSmall = trend.slice(-5, -2).reduce((sum, t) => sum + (t.small || 0), 0);
-            const retailFlow = recentSmall.toFixed(2);
-            if (recentSmall > 0.3) { retailStr = `流入${retailFlow}亿`; retailCls = 'up'; retailIcon = '📈'; }
-            else if (recentSmall < -0.3) { retailStr = `流出${Math.abs(retailFlow)}亿`; retailCls = 'down'; retailIcon = '📉'; }
-            else { retailStr = `净额${retailFlow}亿`; retailCls = 'flat'; retailIcon = '➡️'; }
-          } else if (trend.length === 1) {
-            const small = trend[0].small || 0;
-            retailStr = small > 0 ? `流入${small.toFixed(2)}亿` : `流出${Math.abs(small).toFixed(2)}亿`;
-            retailCls = small > 0 ? 'up' : small < 0 ? 'down' : 'flat';
-            retailIcon = small > 0 ? '📈' : small < 0 ? '📉' : '➡️';
-          }
-          return `<tr style="background:${bgMap[ev.signal] || '#0d1117'}">
+          // 主力出货风险
+          const mfStr = mfRisk.label;
+          const mfClsVal = mfCls[mfRisk.level] || 'flat';
+          const mfDetail = mfRisk.inOutSignals.length ? mfRisk.inOutSignals[0] : '暂无出货信号';
+          // 成交量异动
+          const volStr = mfRisk.volumeDesc || '正常';
+          const volCls = mfRisk.level === 'critical' ? 'down' : mfRisk.level === 'high' ? 'down' : 'flat';
+          // 失效场景
+          const failures = mfRisk.failureScenarios;
+          const failBadge = failures.length ? `<div style="font-size:9px;color:#f0883e">${failures.map(f=>f.name).join('/')}</div>` : '';
+          return `<tr style="background:${mfBg[mfRisk.level] || bgMap[ev.signal] || '#0d1117'}">
             <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div></td>
             <td>${q.price || s.price || '—'}</td>
             <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
             <td class="${sigCls[ev.signal]||'flat'}" style="font-weight:700">${sigMap[ev.signal]||'持有'}</td>
             <td class="${mainCls}">${mainStr}</td>
-            <td class="${retailCls}">${retailIcon} ${retailStr}</td>
+            <td class="${mfClsVal}" style="font-size:11px">${mfStr}<div style="font-size:9px;color:#8b949e;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mfDetail.replace(/"/g,'&quot;')}">${mfDetail}</div>${failBadge}</td>
+            <td class="${volCls}" style="font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${volStr.replace(/"/g,'&quot;')}">${volStr.length > 15 ? volStr.slice(0,15) + '...' : volStr}</td>
             <td style="font-size:11px">${ev.tradeAction}</td>
           </tr>`;
         }).join('')}
       </table></div>
+      ${allFailures.length ? `<div style="margin-top:8px;padding:8px;background:#2d1a0a;border:1px solid #f0883e;border-radius:6px;font-size:11px">
+        <div style="color:#f0883e;font-weight:700;margin-bottom:4px">⚠️ 失效场景预警（${allFailures.length}只触发）</div>
+        ${allFailures.map(f => `<div style="color:#d29922">• <b>${f.stock}</b>：${f.name} — ${f.desc}</div>`).join('')}
+      </div>` : ''}
       <div class="tip-box" style="margin-top:8px;font-size:11px">
         <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)<br>
-        <b>散户动向：</b>📈散户买入(近3日小单净流入) | 📉散户卖出(近3日小单净流出) | ➡️散户观望
+        <b>主力出货：</b>🔴出货(风险分≥50) | 🟠疑似(≥30) | 🟡关注 | 🟢安全<br>
+        <b>成交量：</b>天量天价/放量滞涨/缩量阴跌/底部放量<br>
+        <b>失效场景：</b>系统性暴跌 | 黑天鹅事件 | 疑似洗盘（技术分析可能失效）
+      </div>
+    </div>`;
       </div>
     </div>`;
   } catch(e) {
@@ -474,7 +501,7 @@ async function fetchMarketSnapshot() {
 
 function buildDailyPrompt(today, snapshot, watchlistSummary, watchlistCount) {
   const mkt = snapshot ? `\n## 实时大盘快照\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
-  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. 持仓盈亏分析：基于成本价和当前价的盈亏状态\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n` : '';
+  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. 持仓盈亏分析：基于成本价和当前价的盈亏状态\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n` : '';
   return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告。
 
 **重要：报告必须分为【自选股版块】和【推荐股版块】两个独立版块，用明确标题分隔。**
@@ -509,9 +536,30 @@ ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清�
 每只股票格式：
 | 股票 | 信号 | 理由 | 目标价 | 止损价 |
 
+## 六、🚨 主力出货深度分析（自选股逐只判断）
+对每只自选股重点分析以下维度：
+1. **四大内外盘实战用法**：
+   - 内盘>外盘 + 主力流出 = 出货信号
+   - 外盘>内盘 + 主力流入 = 吸筹信号
+   - 涨停板封单 + 散户出逃 = 托单出货
+   - 尾盘拉升 + 次日低开 = 尾盘诱多
+2. **三种出货手法识别**：
+   - 托单出货：大单托住价格，小单持续成交出货
+   - 对倒出货：主力自买自卖制造放量假象
+   - 压单出货：大单压顶，散户恐慌抛售，主力低位接回
+3. **成交量信号**：
+   - 天量天价：成交量暴增+价格新高 = 顶部特征
+   - 放量滞涨：量增价平 = 上涨乏力
+   - 缩量阴跌：量缩价跌 = 阴跌不止
+   - 底部放量：量增价升 = 可能启动
+4. **三大失效场景**（此时技术分析可能失效）：
+   - 系统性暴跌（大盘恐慌，个股分析失效）
+   - 黑天鹅事件（突发利空，资金面分析失效）
+   - 疑似洗盘（主力假出货真洗盘，资金面假信号）
+
 ---
 
-## 六、🎯 今日推荐20只新股票（机构级评级）
+## 七、🎯 今日推荐20只新股票（机构级评级）
 | 序号 | 代码 | 名称 | 主线 | 五星评级 | 买入理由 | 风险点 | 主力资金 | 趋势 | 买入区间 | 目标价 | 止损价 |
 要求：
 - 恰好20只A股，代码规范
@@ -521,10 +569,10 @@ ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清�
 
 ---
 
-## 七、风险事件日历
-## 八、今日操作策略（仓位+攻防方向）
-## 九、3条交易铁律
-## 十、免责声明`;
+## 八、风险事件日历
+## 九、今日操作策略（仓位+攻防方向）
+## 十、3条交易铁律
+## 十一、免责声明`;
 }
 
 // 将AI的markdown输出转为HTML
