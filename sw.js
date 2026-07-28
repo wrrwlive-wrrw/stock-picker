@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stock-picker-v1';
+const CACHE_NAME = 'stock-picker-v2';
 const ASSETS = [
   './',
   './index.html',

@@ -299,8 +299,6 @@ async function loadWatchlistSignals() {
         <b>失效场景：</b>系统性暴跌 | 黑天鹅事件 | 疑似洗盘（技术分析可能失效）
       </div>
     </div>`;
-      </div>
-    </div>`;
   } catch(e) {
     console.error('loadWatchlistSignals error', e);
     area.innerHTML = '';
