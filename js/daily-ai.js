@@ -134,6 +134,7 @@ function buildWatchlistSummary(watchlist, quotes) {
 }
 
 function renderDailyAI(el) {
+  stopAutoRefresh();
   const today = new Date().toISOString().slice(0, 10);
   const cached = getDailyCache(today);
   const savedKey = getAIKey();
@@ -171,12 +172,17 @@ function renderDailyAI(el) {
         <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : (savedKey ? '点击按钮开始分析' : '未配置API Key，将显示离线分析')}</span>
       </div>
     </div>
+    <div id="autoRefreshBar" style="padding:6px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;font-size:12px">
+      <span style="color:#8b949e">📡 实时信号监控：<span id="refreshStatus" style="color:#16c784">运行中</span></span>
+      <span style="color:#8b949e"><span id="lastRefreshTime">--</span> 更新 | 下次：<span id="nextRefreshCountdown">--</span></span>
+    </div>
     <div id="marketOverviewArea"></div>
     <div id="watchlistSignalArea"></div>
     <div id="dailyResult">${cached ? cached : ''}</div>
   `;
   loadMarketOverview();
   loadWatchlistSignals();
+  startAutoRefresh();
 }
 
 function switchAIProvider() {
@@ -184,6 +190,106 @@ function switchAIProvider() {
   if (!sel) return;
   setAIProvider(sel.value);
   renderDailyAI(document.getElementById('mainContent'));
+}
+
+// === 自动刷新引擎 ===
+let _autoRefreshHourTimer = null;   // 每小时全量刷新
+let _autoRefreshQuickTimer = null;  // 每5分钟轻量检测
+let _autoRefreshCountdown = null;   // 倒计时更新
+let _lastSignalSnapshot = null;     // 上次信号快照，用于对比变化
+let _refreshHourMs = 3600000;       // 1小时
+let _quickCheckMs = 300000;         // 5分钟
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  updateRefreshUI();
+  // 每小时全量刷新
+  _autoRefreshHourTimer = setInterval(() => {
+    doFullRefresh('定时全量刷新');
+  }, _refreshHourMs);
+  // 每5分钟轻量检测（仅拉取行情，检测是否有重大变化）
+  _autoRefreshQuickTimer = setInterval(() => {
+    quickCheckForMajorEvent();
+  }, _quickCheckMs);
+  // 倒计时更新
+  _autoRefreshCountdown = setInterval(updateRefreshUI, 1000);
+  // 记录启动时间
+  _autoRefreshStartTime = Date.now();
+  _autoRefreshNextHour = Date.now() + _refreshHourMs;
+  updateRefreshUI();
+}
+
+function stopAutoRefresh() {
+  if (_autoRefreshHourTimer) { clearInterval(_autoRefreshHourTimer); _autoRefreshHourTimer = null; }
+  if (_autoRefreshQuickTimer) { clearInterval(_autoRefreshQuickTimer); _autoRefreshQuickTimer = null; }
+  if (_autoRefreshCountdown) { clearInterval(_autoRefreshCountdown); _autoRefreshCountdown = null; }
+}
+
+let _autoRefreshStartTime = 0;
+let _autoRefreshNextHour = 0;
+
+function updateRefreshUI() {
+  const statusEl = document.getElementById('refreshStatus');
+  const lastEl = document.getElementById('lastRefreshTime');
+  const nextEl = document.getElementById('nextRefreshCountdown');
+  if (!statusEl) return;
+  const now = Date.now();
+  const lastTime = new Date(_autoRefreshStartTime).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+  if (lastEl) lastEl.textContent = lastTime;
+  const remaining = Math.max(0, _autoRefreshNextHour - now);
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  if (nextEl) nextEl.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+async function doFullRefresh(reason) {
+  const statusEl = document.getElementById('refreshStatus');
+  if (statusEl) { statusEl.textContent = `刷新中(${reason})...`; statusEl.style.color = '#d29922'; }
+  try {
+    await Promise.all([loadMarketOverview(), loadWatchlistSignals()]);
+    if (statusEl) { statusEl.textContent = '运行中'; statusEl.style.color = '#16c784'; }
+  } catch(e) {
+    console.error('自动刷新失败', e);
+    if (statusEl) { statusEl.textContent = '刷新失败'; statusEl.style.color = '#ea3943'; }
+  }
+  _autoRefreshNextHour = Date.now() + _refreshHourMs;
+  updateRefreshUI();
+}
+
+// 轻量检测：只拉取最新行情，检测重大变化
+async function quickCheckForMajorEvent() {
+  try {
+    const { list, quotes } = await fetchWatchlistQuotes();
+    if (!list.length) return;
+    let hasMajorEvent = false;
+    const reasons = [];
+    for (const s of list) {
+      const q = quotes[s.code] || {};
+      const pct = parseFloat(q.pct) || 0;
+      const cap = q.capitalFlow;
+      // 大幅波动：涨跌幅超5%
+      if (Math.abs(pct) >= 5) {
+        hasMajorEvent = true;
+        reasons.push(`${s.name} 涨跌${pct}%`);
+      }
+      // 主力资金大幅流出：单日流出超2亿
+      if (cap && cap.main < -2) {
+        hasMajorEvent = true;
+        reasons.push(`${s.name} 主力流出${cap.main.toFixed(1)}亿`);
+      }
+      // 主力资金大幅流入：单日流入超2亿
+      if (cap && cap.main > 2) {
+        hasMajorEvent = true;
+        reasons.push(`${s.name} 主力流入${cap.main.toFixed(1)}亿`);
+      }
+    }
+    if (hasMajorEvent) {
+      console.log('🚨 检测到重大事件，触发即时刷新:', reasons.join('; '));
+      doFullRefresh('重大事件:' + reasons[0]);
+    }
+  } catch(e) {
+    console.warn('快速检测失败', e);
+  }
 }
 
 // 加载大盘实时概览

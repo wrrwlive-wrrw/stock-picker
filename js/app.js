@@ -102,6 +102,7 @@ function toggleSidebar() {
 
 // 路由
 function navigate(page) {
+  if (typeof stopAutoRefresh === 'function') stopAutoRefresh();
   document.querySelectorAll('.menu-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
