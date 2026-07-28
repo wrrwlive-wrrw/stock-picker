@@ -710,6 +710,9 @@ async function generateDailyAnalysis() {
 }
 
 function getSystemPrompt() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+  const timeStr = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
   return `你是资深A股投研总监，拥有20年实战经验，融合东方财富、同花顺、英为财情三家平台的分析框架。你的风格：
 1. 数据驱动，量化先行，每个判断必须有数据支撑，不讲空话
 2. 必须结合传入的真实实时行情数据（最新价格、涨跌幅、PE、资金流）做研判
@@ -721,7 +724,8 @@ function getSystemPrompt() {
 8. 使用markdown格式，##标题分段
 9. 结尾给出"今日操作策略"和"3条交易铁律"
 10. 如果传入了自选股列表（含实时价格和成本价），必须逐只分析，给出明确的持有/减仓/清仓信号和具体价位
-11. 免责声明：AI分析仅供参考，不构成投资建议`;
+11. ⚠️ 重要：当前真实日期是 ${dateStr} ${timeStr}。你必须基于这个日期做分析，不要使用其他日期。
+12. 免责声明：AI分析仅供参考，不构成投资建议`;
 }
 
 // 拉取实时大盘快照供 Prompt 使用
@@ -739,9 +743,15 @@ async function fetchMarketSnapshot() {
 }
 
 function buildDailyPrompt(today, snapshot, watchlistSummary, watchlistCount) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+  const timeStr = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const mkt = snapshot ? `\n## 实时大盘快照\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
   const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. **个人持仓盈亏分析（核心）**：\n   - 基于成本价和当前价的盈亏状态\n   - 持仓市值、成本总额、浮动盈亏金额\n   - 若持仓过大（占总仓位>20%），建议适当减仓分散风险\n   - 若浮亏>15%，必须给出是否止损的明确建议\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **尾盘半小时异动检测**（14:30-15:00）：\n   - 尾盘大单集中抛售 = 砸盘出货信号\n   - 尾盘急速拉升 = 可能是诱多\n   - 尾盘放量滞涨 = 主力对倒\n   - 尾盘缩量阴跌 = 散户恐慌性抛售\n10. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n` : '';
-  return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告。
+  return `📅 当前真实日期：${dateStr} ${timeStr}（请基于此日期分析，不要使用其他日期）
+⚠️ 以下所有数据均为实时获取的最新数据，请以此为准进行分析。
+
+今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告。
 
 **重要：报告必须分为【自选股版块】和【推荐股版块】两个独立版块，用明确标题分隔。**
 

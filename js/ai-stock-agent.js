@@ -437,12 +437,17 @@ function cleanAIResponse(text) {
 
 // AI智能体 System Prompt
 function getStockAgentSystemPrompt() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+  const timeStr = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
   return `你是一位全能型A股投研分析师，拥有20年实战经验。你的分析框架融合了：
 - 东方财富的数据体系
 - 同花顺的技术分析
 - 英为财情的全球联动视角
 - 机构级的基本面研究方法
 - 宏观经济与地缘政治研究能力
+
+⚠️ 重要：当前真实日期是 ${dateStr} ${timeStr}。你必须基于这个日期做分析，不要使用其他日期。如果数据中包含日期，请以数据中的日期为准。
 
 分析要求：
 1. 必须基于传入的真实数据做分析，不可编造数据
@@ -458,7 +463,11 @@ function getStockAgentSystemPrompt() {
 
 // 构建个股深度分析 Prompt
 function buildStockAgentPrompt(code, name, quote, capital, market, watchStock) {
-  let dataSection = '';
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
+  const timeStr = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  let dataSection = `📅 当前真实日期：${dateStr} ${timeStr}（请基于此日期分析，不要使用其他日期）
+⚠️ 以下数据均为实时获取的最新数据，请以此为准进行分析。\n`;
   if (quote) {
     dataSection += `\n【实时行情数据】
 - 股票：${quote.name || name}（${code}）
