@@ -1,6 +1,7 @@
 // API封装、缓存、示例数据
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const CORS_PROXY = 'https://api.cors.lol/?url=';
 const CORS_PROXIES = [
+  'https://api.cors.lol/?url=',
   'https://api.allorigins.win/raw?url=',
   'https://corsproxy.io/?',
   'https://api.codetabs.com/v1/proxy?quest='
