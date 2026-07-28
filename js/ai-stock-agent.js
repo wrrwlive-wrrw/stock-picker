@@ -493,7 +493,7 @@ ${dataSection}
 // 渲染AI分析报告为HTML
 function renderAIAgentReport(text, code, name, price) {
   // 转义字符串用于JS内嵌
-  const esc = s => (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const esc = s => String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   let html = text;
   // 标题转换
   html = html.replace(/^### (.+)$/gm, '<h4 style="color:#58a6ff;margin:12px 0 6px">$1</h4>');
