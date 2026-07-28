@@ -54,6 +54,7 @@ function addToWatchlist(code, name, price, reason, methods, costPrice) {
   list.push({
     code, name, price: price || '—',
     costPrice: costPrice || price || '—',
+    shares: '',
     reason: reason || '',
     methods: Array.isArray(methods) ? methods : [],
     addDate: new Date().toISOString().slice(0, 10),
@@ -125,6 +126,7 @@ function renderWatchlist(el) {
         <input type="text" id="watchAddName" placeholder="名称" style="width:80px">
         <input type="text" id="watchAddPrice" placeholder="现价" style="width:70px">
         <input type="text" id="watchAddCost" placeholder="成本价" style="width:70px">
+        <input type="text" id="watchAddShares" placeholder="股数" style="width:60px">
         <button class="btn btn-primary" onclick="manualAddWatch()">手动添加</button>
         <button class="btn btn-blue" onclick="addRecommendStocks()">一键导入推荐股</button>
         <span style="margin-left:12px;border-left:1px solid #30363d;padding-left:12px">
@@ -406,12 +408,14 @@ function manualAddWatch() {
   const name = document.getElementById('watchAddName').value.trim();
   const price = document.getElementById('watchAddPrice').value.trim();
   const costPrice = document.getElementById('watchAddCost')?.value.trim() || '';
+  const shares = document.getElementById('watchAddShares')?.value.trim() || '';
   if (!code || !name) { alert('请输入代码和名称'); return; }
   const list = getWatchlist();
   if (list.find(s => s.code === code)) { alert(name + ' 已在自选股中'); return; }
   list.push({
     code, name, price: price || '—',
     costPrice: costPrice || price || '—',
+    shares: shares || '',
     reason: '手动添加',
     methods: [],
     addDate: new Date().toISOString().slice(0, 10),
@@ -456,17 +460,17 @@ function editWatchStock(code) {
   const list = getWatchlist();
   const stock = list.find(s => s.code === code);
   if (!stock) return;
-  // 使用多步prompt收集信息
   const tp = prompt(`编辑 ${stock.name} 的目标价（当前：${stock.targetPrice || '未设置'}）：`, stock.targetPrice || '');
   const sl = prompt(`编辑 ${stock.name} 的止损价（当前：${stock.stopLoss || '未设置'}）：`, stock.stopLoss || '');
   const cp = prompt(`编辑 ${stock.name} 的买入成本价（当前：${stock.costPrice || '未设置'}）：`, stock.costPrice || '');
+  const sh = prompt(`编辑 ${stock.name} 的持仓股数（当前：${stock.shares || '未设置'}）：`, stock.shares || '');
   const r = prompt(`编辑 ${stock.name} 的买入理由（当前：${stock.reason || ''}）：`, stock.reason || '');
-  // 选股方法：逗号分隔
   const currentMethods = (stock.methods || []).join('、');
   const m = prompt(`编辑选股方法（当前：${currentMethods || '无'}）\n可选标签：${METHOD_TAGS.join('、')}\n多个用逗号分隔，如：价值投资,行业龙头,高分红`, currentMethods);
   if (tp !== null) stock.targetPrice = tp;
   if (sl !== null) stock.stopLoss = sl;
   if (cp !== null) stock.costPrice = cp;
+  if (sh !== null) stock.shares = sh;
   if (r !== null) stock.reason = r;
   if (m !== null) {
     stock.methods = m.split(/[,，、]/).map(s=>s.trim()).filter(s=>s);

@@ -1,21 +1,59 @@
-// AI选股智能体模块 — 根据股票代码进行全面深度分析
-// 复用 daily-ai.js 的 getAIConfig(), getAIKey()
+// AI选股智能体模块 — 独立API配置
+
+// === 独立API配置（agent专用，不与每日分析共享） ===
+function getAgentProvider() {
+  return localStorage.getItem('agent_provider') || getAIProvider();
+}
+function setAgentProvider(p) {
+  localStorage.setItem('agent_provider', p);
+}
+function getAgentAIConfig() {
+  const provider = getAgentProvider();
+  const cfg = AI_PROVIDERS[provider] || AI_PROVIDERS.siliconflow;
+  return { provider, url: cfg.url, model: cfg.model, ...cfg };
+}
+function getAgentKey() {
+  return localStorage.getItem('agent_api_key') || getAIKey();
+}
+function saveAgentKey(k) {
+  localStorage.setItem('agent_api_key', k);
+}
 
 function renderAIAgent(el) {
-  const savedKey = getAIKey();
-  const keyMask = savedKey ? savedKey.slice(0,6)+'****'+savedKey.slice(-4) : '未配置';
+  const agentKey = getAgentKey();
+  const agentCfg = getAgentAIConfig();
+  const keyMask = agentKey ? agentKey.slice(0,6)+'****'+agentKey.slice(-4) : '未配置';
   el.innerHTML = `
     <div class="card">
       <div class="card-title">🧠 AI选股智能体</div>
       <p style="color:#8b949e;font-size:13px">输入股票代码或名称，AI将从技术面、基本面、资金面、消息面、行业对比五大维度进行全面深度分析，给出风险预警和买卖建议。</p>
+      <div style="margin-top:8px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:12px;color:#8b949e">智能体AI：</span>
+          <select id="agentProviderSelect" onchange="switchAgentProvider()" style="padding:5px 8px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
+            <option value="siliconflow" ${getAgentProvider()==='siliconflow'?'selected':''}>硅基流动 (Qwen3-32B)</option>
+            <option value="bailian" ${getAgentProvider()==='bailian'?'selected':''}>阿里云百炼 (通义千问)</option>
+            <option value="zhipu" ${getAgentProvider()==='zhipu'?'selected':''}>智谱AI (GLM-4-Flash)</option>
+            <option value="groq" ${getAgentProvider()==='groq'?'selected':''}>Groq (Llama-3.3-70B)</option>
+            <option value="openrouter" ${getAgentProvider()==='openrouter'?'selected':''}>OpenRouter (多模型免费)</option>
+          </select>
+        </div>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:6px">
+          当前：<span style="color:#58a6ff">${agentCfg.name}</span> | Key：<span style="color:#58a6ff">${keyMask}</span>
+          （<a href="${agentCfg.keyUrl}" target="_blank" style="color:#58a6ff">${agentCfg.keyHint}</a>）
+        </div>
+        <div style="display:flex;gap:6px">
+          <input type="password" id="agentKeyInput" placeholder="${agentCfg.keyPlaceholder}" style="flex:1;padding:6px;background:#161b22;border:1px solid #30363d;color:#e6e6e6;border-radius:4px;font-size:12px">
+          <button class="btn btn-blue btn-sm" onclick="setAgentKeyUI()">保存Key</button>
+          <button class="btn btn-sm" style="background:#f0883e;color:#fff" onclick="testAgentConnection()">测试连接</button>
+        </div>
+        <div id="agentTestResult" style="margin-top:6px;font-size:12px"></div>
+      </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input type="text" id="aiAgentCode" placeholder="股票代码 如 sh600519" style="width:160px;padding:8px;background:#0d1117;border:1px solid #30363d;color:#e6e6e6;border-radius:4px">
         <input type="text" id="aiAgentName" placeholder="名称(可选)" style="width:120px;padding:8px;background:#0d1117;border:1px solid #30363d;color:#e6e6e6;border-radius:4px">
         <button class="btn btn-primary" onclick="startAIAnalysis()" id="aiAgentBtn">开始深度分析</button>
-        <span style="font-size:12px;color:#8b949e" id="aiAgentStatus">${savedKey ? '输入代码后点击分析' : '请先在每日分析页配置API Key'}</span>
-      </div>
-      <div style="margin-top:8px;font-size:12px;color:#8b949e">
-        💡 支持输入：纯数字(600519)、带前缀(sh600519)、股票名称(贵州茅台)
+        <span style="font-size:12px;color:#8b949e" id="aiAgentStatus">${agentKey ? '输入代码后点击分析' : '请先配置智能体API Key'}</span>
       </div>
       <div style="margin-top:8px;font-size:12px;color:#8b949e">
         💡 支持输入：纯数字(600519)、带前缀(sh600519)、股票名称(贵州茅台)、简称(茅台)
@@ -37,6 +75,77 @@ function renderAIAgent(el) {
     </div>
     <div id="aiAgentResult"></div>
   `;
+}
+
+function switchAgentProvider() {
+  const sel = document.getElementById('agentProviderSelect');
+  if (!sel) return;
+  setAgentProvider(sel.value);
+  renderAIAgent(document.getElementById('mainContent'));
+}
+
+function setAgentKeyUI() {
+  const v = document.getElementById('agentKeyInput').value.trim();
+  if (!v) { alert('请输入API Key'); return; }
+  const provider = getAgentProvider();
+  const keyPatterns = {
+    siliconflow: /^sk-/,
+    zhipu: /^.+/,
+    groq: /^gsk_/,
+    openrouter: /^sk-or-/
+  };
+  const pattern = keyPatterns[provider];
+  if (pattern && !pattern.test(v)) {
+    alert(`Key格式不匹配：${getAgentAIConfig().keyHint}`);
+    return;
+  }
+  saveAgentKey(v);
+  document.getElementById('agentKeyInput').value = '';
+  alert('智能体API Key已保存！');
+  renderAIAgent(document.getElementById('mainContent'));
+}
+
+async function testAgentConnection() {
+  const key = getAgentKey();
+  if (!key) { alert('请先保存智能体API Key'); return; }
+  const cfg = getAgentAIConfig();
+  const resultEl = document.getElementById('agentTestResult');
+  const startTime = Date.now();
+  resultEl.innerHTML = '<span style="color:#d29922">⏳ 测试连接中...</span>';
+  try {
+    const body = {
+      model: cfg.model,
+      messages: [{ role: 'user', content: '回复"OK"' }],
+      max_tokens: 10
+    };
+    if (getAgentProvider() === 'siliconflow') body.enable_thinking = false;
+    const resp = await fetch(cfg.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000)
+    });
+    const elapsed = Date.now() - startTime;
+    if (resp.ok) {
+      const data = await resp.json();
+      const reply = data.choices?.[0]?.message?.content || '';
+      const usage = data.usage || {};
+      resultEl.innerHTML = `<span style="color:#16c784">✅ 连接成功 (${elapsed}ms)</span> — 模型: <span style="color:#58a6ff">${cfg.model}</span> | 回复: "${reply.slice(0,30)}" ${usage.total_tokens ? '| Token消耗: '+usage.total_tokens : ''}`;
+    } else {
+      const errText = await resp.text().catch(() => '');
+      let errMsg = `HTTP ${resp.status}`;
+      if (resp.status === 401) errMsg = 'API Key无效或已过期';
+      else if (resp.status === 429) errMsg = '请求频率超限，请稍后重试';
+      else if (resp.status === 403) errMsg = 'API Key权限不足';
+      resultEl.innerHTML = `<span style="color:#ea3943">❌ 连接失败: ${errMsg}</span>${errText ? '<br><span style="color:#8b949e;font-size:11px">'+errText.slice(0,120)+'</span>' : ''}`;
+    }
+  } catch(e) {
+    const elapsed = Date.now() - startTime;
+    let errMsg = e.message || '未知错误';
+    if (e.name === 'TimeoutError') errMsg = '连接超时(15s)';
+    else if (e.name === 'TypeError') errMsg = '网络错误';
+    resultEl.innerHTML = `<span style="color:#ea3943">❌ 连接失败 (${elapsed}ms): ${errMsg}</span>`;
+  }
 }
 
 function quickAIAnalysis(code, name) {
@@ -104,8 +213,8 @@ async function startAIAnalysis() {
   const rawName = document.getElementById('aiAgentName').value.trim();
   if (!rawCode && !rawName) { alert('请输入股票代码或名称'); return; }
 
-  const apiKey = getAIKey();
-  if (!apiKey) { alert('请先在"每日分析"页面配置API Key'); return; }
+  const apiKey = getAgentKey();
+  if (!apiKey) { alert('请先在智能体页面配置API Key'); return; }
 
   const btn = document.getElementById('aiAgentBtn');
   const status = document.getElementById('aiAgentStatus');
@@ -182,7 +291,7 @@ async function startAIAnalysis() {
   const watchStock2 = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
   const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock2);
   try {
-    const aiCfg = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+    const aiCfg = typeof getAgentAIConfig === 'function' ? getAgentAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
     const body = {
       model: aiCfg.model,
       temperature: 0.4,
@@ -192,7 +301,7 @@ async function startAIAnalysis() {
         { role: 'user', content: prompt }
       ]
     };
-    if (typeof getAIProvider === 'function' && getAIProvider() === 'siliconflow') body.enable_thinking = false;
+    if (typeof getAgentProvider === 'function' && getAgentProvider() === 'siliconflow') body.enable_thinking = false;
     const res = await fetch(aiCfg.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
@@ -220,7 +329,7 @@ async function startAIAnalysis() {
     result.innerHTML = `<div class="card" style="border-color:#da3633">
       <div class="card-title" style="color:#ea3943">分析失败</div>
       <p style="color:#ea3943;font-size:13px">${e.message || e}</p>
-      <p style="color:#8b949e;font-size:12px;margin-top:8px">请检查API Key是否有效，或稍后重试</p>
+      <p style="color:#8b949e;font-size:12px;margin-top:8px">请检查智能体API Key是否有效，或稍后重试</p>
     </div>`;
     status.textContent = 'AI调用失败';
   }
@@ -229,8 +338,8 @@ async function startAIAnalysis() {
 
 // 从弹窗直接调用的AI分析（不依赖DOM元素）
 async function startAIAnalysisDirect(code, name) {
-  const apiKey = getAIKey();
-  if (!apiKey) { alert('请先在"每日分析"页面配置API Key'); return; }
+  const apiKey = getAgentKey();
+  if (!apiKey) { alert('请先在智能体页面配置API Key'); return; }
 
   // 在弹窗中显示分析状态
   const modal = document.getElementById('stockDetailModal');
@@ -275,7 +384,7 @@ async function startAIAnalysisDirect(code, name) {
   const watchStock = (typeof getWatchlist === 'function') ? getWatchlist().find(s => s.code === code) : null;
   const prompt = buildStockAgentPrompt(code, name, quoteData, capitalData, marketData, watchStock);
   try {
-    const aiCfg2 = typeof getAIConfig === 'function' ? getAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
+    const aiCfg2 = typeof getAgentAIConfig === 'function' ? getAgentAIConfig() : { url: 'https://api.siliconflow.cn/v1/chat/completions', model: 'Qwen/Qwen3-32B' };
     const body2 = {
       model: aiCfg2.model,
       temperature: 0.4,
@@ -285,7 +394,7 @@ async function startAIAnalysisDirect(code, name) {
         { role: 'user', content: prompt }
       ]
     };
-    if (typeof getAIProvider === 'function' && getAIProvider() === 'siliconflow') body2.enable_thinking = false;
+    if (typeof getAgentProvider === 'function' && getAgentProvider() === 'siliconflow') body2.enable_thinking = false;
     const res = await fetch(aiCfg2.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },

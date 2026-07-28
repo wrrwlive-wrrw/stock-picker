@@ -171,6 +171,7 @@ function generateKlineData(basePrice, days) {
 // 东方财富API封装
 const EM_QUOTE_URL = 'https://push2.eastmoney.com/api/qt/stock/get';
 const EM_CAPITAL_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get';
+const EM_INTRADAY_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/kline/get';
 
 // 转换代码格式：sh600519 -> 1.600519, sz000858 -> 0.000858
 function toEMCode(code) {
@@ -212,6 +213,36 @@ async function fetchEMCapitalFlow(code) {
       return result;
     }
   } catch(e) { console.warn('资金流向API失败', e); }
+  return null;
+}
+
+// 获取东方财富分时资金流向（分钟级，用于尾盘检测）
+async function fetchEMIntradayFlow(code) {
+  const cacheKey = 'em_intra_' + code;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+  try {
+    const emCode = toEMCode(code);
+    const url = EM_INTRADAY_URL+'?secid='+emCode+'&klt=1&lmt=0&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65';
+    const text = await fetchWithProxy(url);
+    const json = JSON.parse(text);
+    if (json.data && json.data.klines) {
+      const result = json.data.klines.map(k => {
+        const p = k.split(',');
+        // f51时间, f52主力净流入, f53小单净流入, f54中单净流入, f55大单净流入, f56超大单净流入
+        return {
+          time: p[0] || '',
+          main: parseFloat(p[1] || 0) / 1e4,
+          small: parseFloat(p[2] || 0) / 1e4,
+          mid: parseFloat(p[3] || 0) / 1e4,
+          big: parseFloat(p[4] || 0) / 1e4,
+          super: parseFloat(p[5] || 0) / 1e4
+        };
+      });
+      setCache(cacheKey, result, 60000);
+      return result;
+    }
+  } catch(e) { console.warn('分时资金流向API失败', e); }
   return null;
 }
 

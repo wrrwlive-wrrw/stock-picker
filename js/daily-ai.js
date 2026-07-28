@@ -115,10 +115,25 @@ function buildWatchlistSummary(watchlist, quotes) {
       retailStr = small > 0 ? `散户流入${small.toFixed(2)}亿` : `散户流出${Math.abs(small).toFixed(2)}亿`;
     }
     const cost = s.costPrice || s.addPrice || '未知';
+    const shares = s.shares || '';
     const target = s.targetPrice || '未设';
     const stop = s.stopLoss || '未设';
     const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
-    const pnl = costNum > 0 ? (((parseFloat(price) - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
+    const curNum = parseFloat(price) || 0;
+    const pnl = costNum > 0 ? (((curNum - costNum) / costNum) * 100).toFixed(2) + '%' : '未知';
+    // 个人持仓盈亏金额（按股数计算）
+    let positionStr = '';
+    if (costNum > 0 && curNum > 0) {
+      const sharesNum = parseInt(shares) || 0;
+      if (sharesNum > 0) {
+        const pnlAmount = ((curNum - costNum) * sharesNum).toFixed(2);
+        const marketValue = (curNum * sharesNum).toFixed(2);
+        const costTotal = (costNum * sharesNum).toFixed(2);
+        positionStr = `持仓${sharesNum}股/市值${marketValue}元/成本总额${costTotal}元/浮动盈亏${pnlAmount >= 0 ? '+' : ''}${pnlAmount}元`;
+      } else {
+        positionStr = `成本${cost}元/盈亏${pnl}`;
+      }
+    }
     const methods = (s.methods || []).join('/') || '无';
     // 内外盘资金流详情（供AI分析主力出货）
     let inOutDetail = '';
@@ -129,7 +144,7 @@ function buildWatchlistSummary(watchlist, quotes) {
       const mainFlow = last3.reduce((s, t) => s + (t.main || 0), 0);
       inOutDetail = `近3日主力累计${mainFlow > 0 ? '+' : ''}${mainFlow.toFixed(2)}亿(大单${bigIn > 0 ? '+' : ''}${bigIn.toFixed(2)}亿/超大单${superIn > 0 ? '+' : ''}${superIn.toFixed(2)}亿)`;
     }
-    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 成本:${cost} 盈亏:${pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | ${inOutDetail} | 选股方法:${methods}`;
+    return `${i+1}. ${s.name}(${s.code}) | 现价:${price} 涨跌:${pct} PE:${pe} | 个人持仓：${positionStr || '成本:'+cost+' 盈亏:'+pnl} | 目标:${target} 止损:${stop} | ${capStr} | ${retailStr} | ${inOutDetail} | 选股方法:${methods}`;
   }).join('\n');
 }
 
@@ -283,6 +298,18 @@ async function quickCheckForMajorEvent() {
         reasons.push(`${s.name} 主力流入${cap.main.toFixed(1)}亿`);
       }
     }
+    // 尾盘半小时检测
+    const now = new Date();
+    const h = now.getHours(), m = now.getMinutes();
+    const isTailEnd = (h === 14 && m >= 30) || (h === 15 && m === 0);
+    if (isTailEnd) {
+      const tailResults = await detectTailEndSelling(list);
+      const criticalTail = tailResults.filter(r => r.level === 'critical');
+      if (criticalTail.length) {
+        hasMajorEvent = true;
+        reasons.push(criticalTail.map(r => `${r.name} 尾盘砸盘`).join('; '));
+      }
+    }
     if (hasMajorEvent) {
       console.log('🚨 检测到重大事件，触发即时刷新:', reasons.join('; '));
       doFullRefresh('重大事件:' + reasons[0]);
@@ -325,6 +352,82 @@ async function loadMarketOverview() {
   } catch(e) { area.innerHTML = ''; }
 }
 
+// === 尾盘半小时大单检测 ===
+async function detectTailEndSelling(watchlist) {
+  const results = [];
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  // 只在交易时间段检测（9:30-15:00）
+  const isTradingTime = (hour === 9 && minute >= 30) || (hour >= 10 && hour < 14) || (hour === 14 && minute <= 59) || (hour === 15 && minute === 0);
+  if (!isTradingTime) return results;
+
+  const isTailEnd = (hour === 14 && minute >= 30) || (hour === 15 && minute === 0);
+  
+  for (const s of watchlist.slice(0, 10)) {
+    try {
+      const intraday = await fetchEMIntradayFlow(s.code);
+      if (!intraday || !intraday.length) continue;
+      // 筛选14:30-15:00的数据
+      const tailData = intraday.filter(d => {
+        const t = d.time;
+        if (!t) return false;
+        const parts = t.split(':');
+        if (parts.length < 2) return false;
+        const h = parseInt(parts[0]);
+        const m = parseInt(parts[1]);
+        return (h === 14 && m >= 30) || (h === 15 && m === 0);
+      });
+      if (!tailData.length) continue;
+      // 计算尾盘主力净流入
+      const tailMainNet = tailData.reduce((sum, d) => sum + (d.main || 0), 0);
+      const tailBigNet = tailData.reduce((sum, d) => sum + (d.big || 0) + (d.super || 0), 0);
+      const tailSmallNet = tailData.reduce((sum, d) => sum + (d.small || 0), 0);
+      // 尾盘大单集中度 = 大单/超大单占总净流入的比例
+      const tailTotalNet = Math.abs(tailMainNet) + Math.abs(tailSmallNet);
+      const bigRatio = tailTotalNet > 0 ? Math.abs(tailBigNet) / tailTotalNet : 0;
+      
+      let signal = '';
+      let level = 'normal';
+      // 尾盘大单集中抛售：主力大幅流出 + 大单占比高
+      if (tailMainNet < -50 && bigRatio > 0.6) {
+        signal = `尾盘大单砸盘：主力流出${(tailMainNet/10000).toFixed(2)}亿，大单占比${(bigRatio*100).toFixed(0)}%`;
+        level = 'critical';
+      }
+      // 尾盘主力持续流出
+      else if (tailMainNet < -20) {
+        signal = `尾盘主力流出${(tailMainNet/10000).toFixed(2)}亿`;
+        level = 'warning';
+      }
+      // 尾盘散户抛售，主力接盘
+      else if (tailSmallNet < -30 && tailMainNet > 20) {
+        signal = `尾盘散户抛售${(Math.abs(tailSmallNet)/10000).toFixed(2)}亿，主力接盘`;
+        level = 'info';
+      }
+      // 尾盘急速拉升（可能是诱多）
+      else if (tailMainNet > 50 && tailSmallNet < -30) {
+        signal = `尾盘主力拉升${(tailMainNet/10000).toFixed(2)}亿，散户出逃，警惕诱多`;
+        level = 'warning';
+      }
+      
+      if (signal) {
+        results.push({ code: s.code, name: s.name, signal, level, tailMainNet, tailBigNet, tailSmallNet });
+      }
+    } catch(e) { console.warn('尾盘检测失败', s.name, e); }
+  }
+  return results;
+}
+
+// 将尾盘检测结果注入Prompt
+function buildTailEndSummary(tailResults) {
+  if (!tailResults || !tailResults.length) return '';
+  const lines = tailResults.map(r => {
+    const levelIcon = r.level === 'critical' ? '🔴' : r.level === 'warning' ? '🟠' : 'ℹ️';
+    return `${levelIcon} ${r.name}(${r.code})：${r.signal}`;
+  });
+  return `\n## ⚠️ 尾盘半小时异动检测（14:30-15:00）\n${lines.join('\n')}\n\n对以上尾盘异动必须分析：\n1. 是否存在大资金砸盘收尾\n2. 尾盘异动对次日走势的影响\n3. 是否需要在收盘前减仓\n`;
+}
+
 // 加载自选股实时信号
 async function loadWatchlistSignals() {
   const area = document.getElementById('watchlistSignalArea');
@@ -353,6 +456,10 @@ async function loadWatchlistSignals() {
       if (ra !== rb) return ra - rb;
       return (sigOrder[a.evaluation.signal] || 2) - (sigOrder[b.evaluation.signal] || 2);
     });
+    // 尾盘半小时检测
+    const tailResults = await detectTailEndSelling(list);
+    const tailMap = {};
+    tailResults.forEach(r => { tailMap[r.code] = r; });
     const sigMap = { sell: '🔴 清仓', reduce: '🟠 减仓', hold: '🟡 持有', buy: '🟢 买入' };
     const sigCls = { sell: 'down', reduce: 'down', hold: 'flat', buy: 'up' };
     const bgMap = { sell: '#2d0a0a', reduce: '#2d1f0a', hold: '#0d1117', buy: '#0a2d1a' };
@@ -365,13 +472,29 @@ async function loadWatchlistSignals() {
       <div class="card-title">⚡ 自选股实时信号（${list.length}只）</div>
       <div style="font-size:12px;color:#8b949e;margin-bottom:8px">大盘环境：<span style="color:${marketCtx.color}">${marketCtx.desc}</span></div>
       <div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
-        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>信号</th><th>主力资金</th><th>主力出货</th><th>成交量</th><th>操作建议</th></tr>
+        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>持仓</th><th>信号</th><th>主力资金</th><th>主力出货</th><th>成交量</th><th>操作建议</th></tr>
         ${evaluations.map(({stock:s, quote:q, evaluation:ev, mfRisk}) => {
           const pct = q.pct !== undefined ? q.pct : '—';
           const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
           const cap = ev.capital || {};
           const mainStr = cap.main || '—';
           const mainCls = (typeof mainStr === 'string' && mainStr.startsWith('+')) ? 'up' : 'down';
+          // 持仓盈亏
+          const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
+          const curNum = parseFloat(q.price) || 0;
+          const sharesNum = parseInt(s.shares) || 0;
+          let posStr = '—';
+          let posCls = 'flat';
+          if (costNum > 0 && curNum > 0) {
+            const pnlPct = ((curNum - costNum) / costNum * 100).toFixed(1);
+            posCls = parseFloat(pnlPct) >= 0 ? 'up' : 'down';
+            if (sharesNum > 0) {
+              const pnlAmt = ((curNum - costNum) * sharesNum).toFixed(0);
+              posStr = `${pnlPct >= 0 ? '+' : ''}${pnlPct}%(${pnlAmt >= 0 ? '+' : ''}${pnlAmt}元)`;
+            } else {
+              posStr = `${pnlPct >= 0 ? '+' : ''}${pnlPct}%`;
+            }
+          }
           // 主力出货风险
           const mfStr = mfRisk.label;
           const mfClsVal = mfCls[mfRisk.level] || 'flat';
@@ -382,10 +505,14 @@ async function loadWatchlistSignals() {
           // 失效场景
           const failures = mfRisk.failureScenarios;
           const failBadge = failures.length ? `<div style="font-size:9px;color:#f0883e">${failures.map(f=>f.name).join('/')}</div>` : '';
+          // 尾盘异动
+          const tail = tailMap[s.code];
+          const tailBadge = tail ? `<div style="font-size:9px;color:${tail.level==='critical'?'#ea3943':tail.level==='warning'?'#f0883e':'#58a6ff'};margin-top:2px" title="${tail.signal.replace(/"/g,'&quot;')}">尾盘${tail.level==='critical'?'🔴砸盘':tail.level==='warning'?'🟠异动':'🔵关注'}</div>` : '';
           return `<tr style="background:${mfBg[mfRisk.level] || bgMap[ev.signal] || '#0d1117'}">
-            <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div></td>
+            <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div>${tailBadge}</td>
             <td>${q.price || s.price || '—'}</td>
             <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
+            <td class="${posCls}" style="font-size:11px;font-weight:600">${posStr}</td>
             <td class="${sigCls[ev.signal]||'flat'}" style="font-weight:700">${sigMap[ev.signal]||'持有'}</td>
             <td class="${mainCls}">${mainStr}</td>
             <td class="${mfClsVal}" style="font-size:11px">${mfStr}<div style="font-size:9px;color:#8b949e;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mfDetail.replace(/"/g,'&quot;')}">${mfDetail}</div>${failBadge}</td>
@@ -398,10 +525,15 @@ async function loadWatchlistSignals() {
         <div style="color:#f0883e;font-weight:700;margin-bottom:4px">⚠️ 失效场景预警（${allFailures.length}只触发）</div>
         ${allFailures.map(f => `<div style="color:#d29922">• <b>${f.stock}</b>：${f.name} — ${f.desc}</div>`).join('')}
       </div>` : ''}
+      ${tailResults.length ? `<div style="margin-top:8px;padding:8px;background:#1a0d2d;border:1px solid #a371f7;border-radius:6px;font-size:11px">
+        <div style="color:#a371f7;font-weight:700;margin-bottom:4px">🕐 尾盘半小时异动（14:30-15:00）</div>
+        ${tailResults.map(r => `<div style="color:${r.level==='critical'?'#ea3943':r.level==='warning'?'#f0883e':'#58a6ff'};margin-bottom:2px">• <b>${r.name}</b>：${r.signal}</div>`).join('')}
+      </div>` : ''}
       <div class="tip-box" style="margin-top:8px;font-size:11px">
         <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)<br>
         <b>主力出货：</b>🔴出货(风险分≥50) | 🟠疑似(≥30) | 🟡关注 | 🟢安全<br>
         <b>成交量：</b>天量天价/放量滞涨/缩量阴跌/底部放量<br>
+        <b>尾盘异动：</b>🔴砸盘(主力流出>5000万) | 🟠异动(>2000万) | 🔵关注<br>
         <b>失效场景：</b>系统性暴跌 | 黑天鹅事件 | 疑似洗盘（技术分析可能失效）
       </div>
     </div>`;
@@ -520,8 +652,11 @@ async function generateDailyAnalysis() {
   status.textContent = '拉取自选股实时行情...';
   const { list: watchlist, quotes } = await fetchWatchlistQuotes();
   const watchlistSummary = buildWatchlistSummary(watchlist, quotes);
-  status.textContent = 'AI深度分析中（含自选股+大盘数据）...';
-  const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary, watchlist.length);
+  status.textContent = '检测尾盘半小时异动...';
+  const tailResults = await detectTailEndSelling(watchlist);
+  const tailSummary = buildTailEndSummary(tailResults);
+  status.textContent = 'AI深度分析中（含自选股+大盘+尾盘数据）...';
+  const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary + tailSummary, watchlist.length);
 
   try {
     const aiCfg = getAIConfig();
@@ -605,7 +740,7 @@ async function fetchMarketSnapshot() {
 
 function buildDailyPrompt(today, snapshot, watchlistSummary, watchlistCount) {
   const mkt = snapshot ? `\n## 实时大盘快照\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
-  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. 持仓盈亏分析：基于成本价和当前价的盈亏状态\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n` : '';
+  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. **个人持仓盈亏分析（核心）**：\n   - 基于成本价和当前价的盈亏状态\n   - 持仓市值、成本总额、浮动盈亏金额\n   - 若持仓过大（占总仓位>20%），建议适当减仓分散风险\n   - 若浮亏>15%，必须给出是否止损的明确建议\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **尾盘半小时异动检测**（14:30-15:00）：\n   - 尾盘大单集中抛售 = 砸盘出货信号\n   - 尾盘急速拉升 = 可能是诱多\n   - 尾盘放量滞涨 = 主力对倒\n   - 尾盘缩量阴跌 = 散户恐慌性抛售\n10. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n` : '';
   return `今天是${today}。请参考东方财富、同花顺、英为财情的分析框架，为我做一份机构级专业投资分析报告。
 
 **重要：报告必须分为【自选股版块】和【推荐股版块】两个独立版块，用明确标题分隔。**
@@ -639,6 +774,14 @@ ${mkt}${wl}
 ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清仓信号和具体价位。' : '当前无自选股，请跳过此版块。'}
 每只股票格式：
 | 股票 | 信号 | 理由 | 目标价 | 止损价 |
+
+## 五-A、💰 个人持仓资金分析（基于自选股数据）
+根据自选股的成本价、持仓股数、当前价，给出完整的资金分析：
+1. **持仓总市值**：所有自选股的持仓市值之和
+2. **总成本**：所有自选股的成本总额之和
+3. **总浮动盈亏**：总市值-总成本，盈亏比例
+4. **仓位结构**：每只股票占总市值的比例，是否过于集中
+5. **调仓建议**：是否有需要减仓/加仓的，给出具体建议
 
 ## 六、🚨 主力出货深度分析（自选股逐只判断）
 对每只自选股重点分析以下维度：
