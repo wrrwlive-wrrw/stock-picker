@@ -63,22 +63,23 @@ function saveAIKey(k) {
   localStorage.setItem('ai_api_key', k);
 }
 
-// 获取自选股实时行情（批量）
+// 获取自选股实时行情（批量 - 一次请求获取所有行情）
 async function fetchWatchlistQuotes() {
   const key = 'stock_watchlist_' + (currentUser?.username || 'guest');
   let watchlist = [];
   try { watchlist = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
   if (!watchlist.length) return { list: [], quotes: {} };
   const quotes = {};
-  // 并行拉取所有股票行情（带缓存）
-  const fetches = watchlist.map(async s => {
-    try {
-      const data = await fetchAStockQuote(s.code);
-      if (data) quotes[s.code] = data;
-    } catch(e) {}
+  // 批量拉取所有股票行情（1次请求代替N次）
+  const codes = watchlist.map(s => s.code);
+  let quotesMap = {};
+  try {
+    quotesMap = await fetchAStockQuotesBatch(codes);
+  } catch(e) { console.warn('批量行情失败', e); }
+  watchlist.forEach(s => {
+    if (quotesMap[s.code]) quotes[s.code] = quotesMap[s.code];
   });
-  await Promise.allSettled(fetches);
-  // 拉取资金流向
+  // 拉取资金流向（逐个，东方财富不支持批量）
   const capFetches = watchlist.map(async s => {
     try {
       const capData = await fetchEMCapitalFlow(s.code);

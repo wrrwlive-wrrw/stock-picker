@@ -202,20 +202,22 @@ async function refreshWatchlistRealTime() {
   if (currentMethodFilter) list = list.filter(s => (s.methods || []).includes(currentMethodFilter));
   if (!list.length) return;
   const results = {};
-  const fetches = list.map(async s => {
+  const codes = list.map(s => s.code);
+  // 批量拉取所有股票行情（1次请求代替N次）
+  let quotesMap = {};
+  try {
+    quotesMap = await fetchAStockQuotesBatch(codes);
+  } catch(e) { console.warn('批量行情失败', e); }
+  // 逐个拉取资金流（东方财富API不支持批量）
+  const capFetches = list.map(async s => {
     try {
-      const [quote, capFlow] = await Promise.all([
-        fetchAStockQuote(s.code).catch(() => null),
-        fetchEMCapitalFlow(s.code).catch(() => null)
-      ]);
-      // API失败时用SAMPLE_STOCKS兜底
-      const finalQuote = quote || SAMPLE_STOCKS[s.code] || null;
-      results[s.code] = { quote: finalQuote, capFlow };
+      const capFlow = await fetchEMCapitalFlow(s.code);
+      results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow };
     } catch(e) {
-      results[s.code] = { quote: SAMPLE_STOCKS[s.code] || null, capFlow: null };
+      results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow: null };
     }
   });
-  await Promise.allSettled(fetches);
+  await Promise.allSettled(capFetches);
   const tableCard = document.getElementById('watchlistTableCard');
   if (tableCard) {
     tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);

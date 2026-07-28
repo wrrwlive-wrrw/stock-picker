@@ -114,6 +114,47 @@ async function fetchAStockQuote(code) {
   return null;
 }
 
+// 批量获取A股实时数据（一次请求获取所有股票，大幅减少代理请求）
+async function fetchAStockQuotesBatch(codes) {
+  if (!codes.length) return {};
+  const results = {};
+  // 先检查缓存
+  const uncachedCodes = [];
+  codes.forEach(code => {
+    const cached = getCache('quote_' + code);
+    if (cached) results[code] = cached;
+    else uncachedCodes.push(code);
+  });
+  if (!uncachedCodes.length) return results;
+  try {
+    const url = 'http://qt.gtimg.cn/q=' + uncachedCodes.join(',');
+    const text = await fetchWithProxy(url, 'gbk');
+    const lines = text.split(';').filter(l => l.trim());
+    lines.forEach(line => {
+      const match = line.match(/v_(\w+)="(.+)"/);
+      if (!match) return;
+      const [, code, data] = match;
+      const parts = data.split('~');
+      if (parts.length >= 45) {
+        results[code] = {
+          name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
+          pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
+          low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
+          pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
+        };
+        setCache('quote_' + code, results[code]);
+      }
+    });
+  } catch(e) {
+    console.warn('批量行情API失败', e.message);
+  }
+  // 缓存失败的用SAMPLE_STOCKS兜底
+  uncachedCodes.forEach(code => {
+    if (!results[code]) results[code] = SAMPLE_STOCKS[code] || null;
+  });
+  return results;
+}
+
 // 解析腾讯股票数据
 function parseQQQuote(text, code) {
   const parts = text.split('~');
