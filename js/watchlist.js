@@ -201,30 +201,22 @@ async function refreshWatchlistRealTime() {
   list = list.filter(s => s && s.code && s.name);
   if (currentMethodFilter) list = list.filter(s => (s.methods || []).includes(currentMethodFilter));
   if (!list.length) return;
+  const results = {};
   const codes = list.map(s => s.code);
-  // 先批量拉行情（东方财富直连）
   let quotesMap = {};
   try {
     quotesMap = await fetchAStockQuotesBatch(codes);
   } catch(e) { console.warn('批量行情失败', e); }
-  // 先渲染表格（quotes有了，资金流稍后更新）
-  let results = {};
-  codes.forEach(c => { results[c] = { quote: quotesMap[c] || SAMPLE_STOCKS[c] || null, capFlow: null }; });
-  const tableCard = document.getElementById('watchlistTableCard');
-  if (tableCard) {
-    tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);
-  }
-  // 分批串行拉取资金流（东方财富直连，延迟缩短至150ms）
-  const capResults = {};
   for (const s of list) {
     try {
       const capFlow = await fetchEMCapitalFlow(s.code);
-      capResults[s.code] = capFlow;
-    } catch(e) { capResults[s.code] = null; }
-    await new Promise(r => setTimeout(r, 150));
+      results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow };
+    } catch(e) {
+      results[s.code] = { quote: quotesMap[s.code] || SAMPLE_STOCKS[s.code] || null, capFlow: null };
+    }
+    await new Promise(r => setTimeout(r, 300));
   }
-  // 资金流到位后刷新表格
-  codes.forEach(c => { results[c].capFlow = capResults[c] || null; });
+  const tableCard = document.getElementById('watchlistTableCard');
   if (tableCard) {
     tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);
   }
