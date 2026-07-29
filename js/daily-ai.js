@@ -963,9 +963,8 @@ ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清�
 ## 十、风险事件日历
 ## 十一、今日操作策略（仓位+攻防方向）
 ## 十二、3条交易铁律
-## 十三、免责声明`;`;
+## 十三、免责声明`;
 }
-
 // 将AI的markdown输出转为HTML
 function formatAIResult(text) {
   // 清理AI思考标签（兼容DeepSeek/Qwen等CoT模型）
