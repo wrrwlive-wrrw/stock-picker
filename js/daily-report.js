@@ -117,6 +117,7 @@ function viewReportDetail(id) {
   const reports = getReportList();
   const r = reports.find(x => x.id === id);
   if (!r) return;
+  const content = makeStockCodesClickable(r.content);
   document.getElementById('reportDetailModal').innerHTML = `
     <div id="reportOverlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)closeReportDetail()">
       <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;width:90%;max-width:800px;max-height:80vh;overflow-y:auto">
@@ -125,9 +126,98 @@ function viewReportDetail(id) {
           <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="closeReportDetail()">关闭</button>
         </div>
         <div style="color:#8b949e;font-size:12px;margin-bottom:12px">生成时间：${new Date(r.createTime).toLocaleString('zh-CN')}</div>
-        <div style="color:#c9d1d9;line-height:1.7;font-size:14px">${r.content}</div>
+        <div style="color:#c9d1d9;line-height:1.7;font-size:14px">${content}</div>
       </div>
     </div>
+  `;
+}
+
+// 将报告中的股票代码转为可点击链接
+function makeStockCodesClickable(html) {
+  return html.replace(/(sh|sz)(\d{6})/g, '<a href="#" onclick="event.preventDefault();showReportStockFlow(\'$1$2\')" style="color:#58a6ff;text-decoration:underline;cursor:pointer" title="点击查看资金流向">$1$2</a>');
+}
+
+// 报告弹窗：查看个股早盘+尾盘资金流向
+async function showReportStockFlow(code) {
+  // 获取股票名称
+  const list = JSON.parse(localStorage.getItem('stock_watchlist_' + (currentUser?.username || 'guest')) || '[]');
+  const stock = list.find(s => s.code === code);
+  const stockName = stock?.name || code;
+  // 创建弹窗
+  let overlay = document.getElementById('reportFlowOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'reportFlowOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1010;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#0d1117;border:1px solid #30363d;border-radius:12px;max-width:500px;width:100%;padding:24px;color:#e6e6e6';
+  modal.innerHTML = `<div style="text-align:center;padding:20px;color:#58a6ff">⏳ 加载 ${stockName} 资金流向数据...</div>`;
+  overlay.appendChild(modal);
+  // 获取分时资金流
+  const intraday = await fetchEMIntradayFlow(code);
+  if (!intraday || !intraday.length) {
+    modal.innerHTML = `<div style="text-align:center;padding:20px;color:#8b949e">暂无分时资金数据</div>
+      <button onclick="this.closest('#reportFlowOverlay').remove()" style="display:block;margin:10px auto;background:#30363d;color:#e6e6e6;border:none;padding:6px 20px;border-radius:6px;cursor:pointer">关闭</button>`;
+    return;
+  }
+  // 筛选早盘9:30-11:30
+  const morningData = intraday.filter(d => {
+    if (!d.time) return false;
+    const p = d.time.split(':'); const h = parseInt(p[0]), m = parseInt(p[1]);
+    return (h === 9 && m >= 30) || h === 10 || (h === 11 && m <= 30);
+  });
+  // 尾盘14:30-15:00（含集合竞价）
+  const tailData = intraday.filter(d => {
+    if (!d.time) return false;
+    const p = d.time.split(':'); const h = parseInt(p[0]), m = parseInt(p[1]);
+    return (h === 14 && m >= 30) || (h === 15 && m === 0);
+  });
+  const sum = data => data.reduce((s, d) => s + (d.main || 0), 0);
+  const morningNet = sum(morningData);
+  const tailNet = sum(tailData);
+  const morningBig = morningData.reduce((s, d) => s + (d.big||0) + (d.super||0), 0);
+  const tailBig = tailData.reduce((s, d) => s + (d.big||0) + (d.super||0), 0);
+  const fmt = v => `${v >= 0 ? '+' : ''}${(v/10000).toFixed(2)}亿`;
+  const cls = v => v >= 0 ? 'up' : 'down';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="margin:0;color:#e6e6e6">${stockName} <span style="font-size:13px;color:#8b949e">${code}</span></h3>
+      <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="this.closest('#reportFlowOverlay').remove()">关闭</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px">
+        <div style="font-size:12px;color:#58a6ff;font-weight:700;margin-bottom:8px">☀️ 早盘资金 (9:30-11:30)</div>
+        <div style="font-size:11px;color:#8b949e">主力净流入</div>
+        <div class="${cls(morningNet)}" style="font-size:18px;font-weight:700">${fmt(morningNet)}</div>
+        <div style="margin-top:6px;font-size:11px;color:#8b949e">大单净额：<span class="${cls(morningBig)}">${fmt(morningBig)}</span></div>
+        <div style="font-size:11px;color:#8b949e">数据分钟：${morningData.length}笔</div>
+      </div>
+      <div style="padding:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px">
+        <div style="font-size:12px;color:#f0883e;font-weight:700;margin-bottom:8px">🏁 尾盘资金 (14:30-15:00)</div>
+        <div style="font-size:11px;color:#8b949e">主力净流入</div>
+        <div class="${cls(tailNet)}" style="font-size:18px;font-weight:700">${fmt(tailNet)}</div>
+        <div style="margin-top:6px;font-size:11px;color:#8b949e">大单净额：<span class="${cls(tailBig)}">${fmt(tailBig)}</span></div>
+        <div style="font-size:11px;color:#8b949e">数据分钟：${tailData.length}笔</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:11px">
+      <div style="font-weight:700;margin-bottom:4px;color:#8b949e">分析结论</div>
+      ${morningNet < -200 ? '<div style="color:#ea3943">🔴 早盘主力大幅流出 >2亿，警惕午后进一步杀跌</div>' : morningNet < -100 ? '<div style="color:#f0883e">🟠 早盘主力流出 >1亿，关注午后资金是否回流</div>' : morningNet > 200 ? '<div style="color:#3fb950">🟢 早盘主力大幅流入 >2亿，走势较强</div>' : '<div style="color:#8b949e">⚪ 早盘资金面相对平稳</div>'}
+      ${tailNet < -50 ? '<div style="color:#ea3943">🔴 尾盘主力大幅流出，有不计成本砸盘迹象</div>' : tailNet < -20 ? '<div style="color:#f0883e">🟠 尾盘主力流出，有一定抛压</div>' : tailNet > 50 ? '<div style="color:#f0883e">🟠 尾盘主力拉抬，警惕诱多</div>' : '<div style="color:#8b949e">⚪ 尾盘资金面相对平稳</div>'}
+    </div>
+    <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap;max-height:180px;overflow-y:auto;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px">
+      <div style="font-size:11px;color:#8b949e;width:100%;font-weight:700">分时资金流向明细</div>
+      ${intraday.map(d => {
+        const mCls = d.main >= 0 ? 'up' : 'down';
+        return `<div style="font-size:10px;width:50%;display:flex;gap:4px">
+          <span style="color:#8b949e">${d.time}</span>
+          <span class="${mCls}">${(d.main/10000).toFixed(2)}亿</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <button onclick="this.closest('#reportFlowOverlay').remove()" style="display:block;margin:16px auto 0;background:#30363d;color:#e6e6e6;border:none;padding:8px 30px;border-radius:6px;cursor:pointer">关闭</button>
   `;
 }
 function closeReportDetail() {

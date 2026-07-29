@@ -120,10 +120,31 @@ const SAMPLE_STOCKS = {
   sh600519: { name:'贵州茅台', price:1756.00, change:12.50, pct:0.72, pe:28.5, pb:9.2, volume:'2.3万手' }
 };
 
-// 获取A股实时数据（腾讯接口，多代理fallback，GBK编码）
+// 获取A股实时数据（东方财富直连，失败回退腾讯代理+SAMPLE_STOCKS兜底）
 async function fetchAStockQuote(code) {
   const cached = getCache('quote_' + code);
   if (cached) return cached;
+  // 东方财富直连
+  try {
+    const emCode = toEMCode(code);
+    const url = EM_QUOTE_URL+'?secid='+emCode+'&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f116,f117,f162,f163,f168,f169,f170,f171,f183,f187';
+    const res = await fetchWithRetry(url);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        const d = json.data;
+        const result = {
+          name: String(d.f58||''), price: (d.f43||0)/100, change: (d.f162||0)/100,
+          pct: (d.f163||0)/100, volume: (d.f47||0)+'手',
+          high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: (d.f60||0)/100,
+          pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
+        };
+        setCache('quote_' + code, result);
+        return result;
+      }
+    }
+  } catch(e) {}
+  // 回退腾讯代理
   try {
     const url = 'http://qt.gtimg.cn/q=' + code;
     const text = await fetchWithProxy(url, 'gbk');
@@ -132,9 +153,8 @@ async function fetchAStockQuote(code) {
   } catch(e) {
     console.warn('行情API失败', code, e.message);
   }
-  // 兜底：用SAMPLE_STOCKS精确匹配
+  // 兜底
   if (SAMPLE_STOCKS[code]) return SAMPLE_STOCKS[code];
-  // 模糊匹配：code只取后6位
   const pureCode = code.replace(/^(sh|sz)/, '');
   for (const [k, v] of Object.entries(SAMPLE_STOCKS)) {
     if (k.endsWith(pureCode)) return v;
@@ -142,44 +162,67 @@ async function fetchAStockQuote(code) {
   return null;
 }
 
-// 批量获取A股实时数据（一次请求获取所有股票，大幅减少代理请求）
+// 批量获取A股实时数据（先用东方财富直连，失败回退腾讯代理）
 async function fetchAStockQuotesBatch(codes) {
   if (!codes.length) return {};
   const results = {};
   // 先检查缓存
-  const uncachedCodes = [];
-  codes.forEach(code => {
-    const cached = getCache('quote_' + code);
-    if (cached) results[code] = cached;
-    else uncachedCodes.push(code);
+  const uncached = [];
+  codes.forEach(c => {
+    const cached = getCache('quote_' + c);
+    if (cached) results[c] = cached;
+    else uncached.push(c);
   });
-  if (!uncachedCodes.length) return results;
-  try {
-    const url = 'http://qt.gtimg.cn/q=' + uncachedCodes.join(',');
-    const text = await fetchWithProxy(url, 'gbk');
-    const lines = text.split(';').filter(l => l.trim());
-    lines.forEach(line => {
-      const match = line.match(/v_(\w+)="(.+)"/);
-      if (!match) return;
-      const [, code, data] = match;
-      const parts = data.split('~');
-      if (parts.length >= 45) {
-        results[code] = {
-          name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
-          pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
-          low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
-          pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
-        };
-        setCache('quote_' + code, results[code]);
-      }
-    });
-  } catch(e) {
-    console.warn('批量行情API失败', e.message);
+  if (!uncached.length) return results;
+
+  // 尝试东方财富直连（HTTPS+CORS，无需代理）
+  const emFetch = uncached.map(async code => {
+    try {
+      const url = EM_QUOTE_URL+'?secid='+toEMCode(code)+'&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f116,f117,f162,f163,f168,f169,f170,f171,f183,f187';
+      const res = await fetchWithRetry(url);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (!json.data) return;
+      const d = json.data;
+      const prevClose = (d.f60||0) / 100;
+      const price = (d.f43||0) / 100;
+      results[code] = {
+        name: String(d.f58||''), price: price, change: (d.f162||0)/100,
+        pct: (d.f163||0)/100, volume: (d.f47||0)+'手',
+        high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: prevClose,
+        pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
+      };
+      setCache('quote_' + code, results[code]);
+    } catch(e) {}
+  });
+  await Promise.allSettled(emFetch);
+
+  // 失败的回退到腾讯API（通过代理）
+  const stillMissing = uncached.filter(c => !results[c]);
+  if (stillMissing.length) {
+    try {
+      const url = 'http://qt.gtimg.cn/q=' + stillMissing.join(',');
+      const text = await fetchWithProxy(url, 'gbk');
+      const lines = text.split(';').filter(l => l.trim());
+      lines.forEach(line => {
+        const match = line.match(/v_(\w+)="(.+)"/);
+        if (!match) return;
+        const [, code, data] = match;
+        const parts = data.split('~');
+        if (parts.length >= 45) {
+          results[code] = {
+            name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
+            pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
+            low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
+            pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
+          };
+          setCache('quote_' + code, results[code]);
+        }
+      });
+    } catch(e) { console.warn('腾讯批量行情失败', e.message); }
   }
-  // 缓存失败的用SAMPLE_STOCKS兜底
-  uncachedCodes.forEach(code => {
-    if (!results[code]) results[code] = SAMPLE_STOCKS[code] || null;
-  });
+  // 兜底
+  uncached.forEach(c => { if (!results[c]) results[c] = SAMPLE_STOCKS[c] || null; });
   return results;
 }
 
