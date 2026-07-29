@@ -28,6 +28,16 @@ async function fetchWithRetry(url, options = {}, retries = 2) {
 
 // 带多代理fallback的fetch（支持GBK/GB2312编码）
 async function fetchWithProxy(url, encoding) {
+  // HTTPS API优先直连（东方财富支持CORS，无需代理）
+  if (url.startsWith('https://')) {
+    try {
+      const res = await fetchWithRetry(url);
+      if (res.ok) {
+        if (encoding) { const buf = await res.arrayBuffer(); return new TextDecoder(encoding).decode(buf); }
+        return await res.text();
+      }
+    } catch(e) {}
+  }
   for (const proxy of CORS_PROXIES) {
     try {
       const res = await fetchWithRetry(proxy + encodeURIComponent(url));

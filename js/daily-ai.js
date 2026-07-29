@@ -429,6 +429,91 @@ function buildTailEndSummary(tailResults) {
   return `\n## ⚠️ 尾盘半小时异动检测（14:30-15:00）\n${lines.join('\n')}\n\n对以上尾盘异动必须分析：\n1. 是否存在大资金砸盘收尾\n2. 尾盘异动对次日走势的影响\n3. 是否需要在收盘前减仓\n`;
 }
 
+// === 早盘核心多空资金流向检测（9:30-11:30）===
+async function detectEarlySessionFlow(watchlist) {
+  const results = [];
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+  const isAfterMorning = h > 11 || (h === 11 && m >= 30);
+  if (!isAfterMorning) return results;
+  for (const s of watchlist.slice(0, 10)) {
+    try {
+      const intraday = await fetchEMIntradayFlow(s.code);
+      if (!intraday || !intraday.length) continue;
+      const morning = intraday.filter(d => {
+        if (!d.time) return false;
+        const p = d.time.split(':');
+        if (p.length < 2) return false;
+        const dh = parseInt(p[0]), dm = parseInt(p[1]);
+        return (dh === 9 && dm >= 30) || dh === 10 || (dh === 11 && dm <= 30);
+      });
+      if (!morning.length) continue;
+      const net = morning.reduce((s, d) => s + (d.main || 0), 0);
+      const big = morning.reduce((s, d) => s + (d.big || 0) + (d.super || 0), 0);
+      const small = morning.reduce((s, d) => s + (d.small || 0), 0);
+      let signal = '', level = 'normal';
+      if (net < -200) { signal = `早盘主力大幅流出${(net/10000).toFixed(2)}亿，大单${big>0?'流入':'流出'}${(Math.abs(big)/10000).toFixed(2)}亿`; level = 'critical'; }
+      else if (net < -100) { signal = `早盘主力流出${(net/10000).toFixed(2)}亿`; level = 'warning'; }
+      else if (net > 200) { signal = `早盘主力大幅流入${(net/10000).toFixed(2)}亿`; level = 'positive'; }
+      if (signal) results.push({ code: s.code, name: s.name, signal, level, main: net, big, small });
+    } catch(e) {}
+  }
+  return results;
+}
+
+// === 尾盘集合竞价检测（14:57-15:00）===
+async function detectClosingAuction(watchlist) {
+  const results = [];
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+  if (h < 14 || (h === 14 && m < 57) || h > 15) return results;
+  for (const s of watchlist.slice(0, 10)) {
+    try {
+      const intraday = await fetchEMIntradayFlow(s.code);
+      if (!intraday || !intraday.length) continue;
+      const auction = intraday.filter(d => {
+        if (!d.time) return false;
+        const p = d.time.split(':');
+        if (p.length < 2) return false;
+        const dh = parseInt(p[0]), dm = parseInt(p[1]);
+        return (dh === 14 && dm >= 57) || (dh === 15 && dm === 0);
+      });
+      if (!auction.length) continue;
+      const net = auction.reduce((s, d) => s + (d.main || 0), 0);
+      const big = auction.reduce((s, d) => s + (d.big || 0) + (d.super || 0), 0);
+      const small = auction.reduce((s, d) => s + (d.small || 0), 0);
+      const totalAbs = Math.abs(net) + Math.abs(small);
+      const bigRatio = totalAbs > 0 ? Math.abs(big) / totalAbs : 0;
+      let signal = '', level = 'normal';
+      if (net < -50 && bigRatio > 0.7) {
+        signal = `集合竞价大资金不计成本砸盘：主力流出${(net/10000).toFixed(2)}亿，大单占比${(bigRatio*100).toFixed(0)}%`;
+        level = 'critical';
+      } else if (net < -20) { signal = `集合竞价主力流出${(net/10000).toFixed(2)}亿`; level = 'warning'; }
+      else if (net > 50 && small < -20) { signal = `集合竞价主力拉抬${(net/10000).toFixed(2)}亿，可能是诱多`; level = 'warning'; }
+      if (signal) results.push({ code: s.code, name: s.name, signal, level });
+    } catch(e) {}
+  }
+  return results;
+}
+
+// 构建早盘资金流摘要
+function buildEarlyFlowSummary(earlyResults) {
+  if (!earlyResults || !earlyResults.length) return '';
+  return `\n## ☀️ 早盘主力资金流向检测（9:30-11:30）\n${earlyResults.map(r => {
+    const icon = r.level === 'critical' ? '🔴' : r.level === 'warning' ? '🟠' : r.level === 'positive' ? '🟢' : 'ℹ️';
+    return `${icon} ${r.name}(${r.code})：${r.signal}`;
+  }).join('\n')}\n\n对以上早盘异动分析：\n1. 早盘主力大幅流出的是否午后有反转可能\n2. 早盘拉高是否为主力出货掩护\n3. 午后操作策略调整建议\n`;
+}
+
+// 构建集合竞价摘要
+function buildAuctionSummary(auctionResults) {
+  if (!auctionResults || !auctionResults.length) return '';
+  return `\n## 🏁 尾盘集合竞价监测（14:57-15:00）\n${auctionResults.map(r => {
+    const icon = r.level === 'critical' ? '🔴' : r.level === 'warning' ? '🟠' : 'ℹ️';
+    return `${icon} ${r.name}(${r.code})：${r.signal}`;
+  }).join('\n')}\n\n对以上集合竞价分析：\n1. 是否存在大资金不计成本砸盘收尾\n2. 集合竞价异动对次日开盘的影响\n3. 是否需调整收盘仓位\n`;
+}
+
 // 加载自选股实时信号
 async function loadWatchlistSignals() {
   const area = document.getElementById('watchlistSignalArea');
@@ -461,6 +546,14 @@ async function loadWatchlistSignals() {
     const tailResults = await detectTailEndSelling(list);
     const tailMap = {};
     tailResults.forEach(r => { tailMap[r.code] = r; });
+    // 早盘核心多空资金流向检测
+    const earlyResults = await detectEarlySessionFlow(list);
+    const earlyMap = {};
+    earlyResults.forEach(r => { earlyMap[r.code] = r; });
+    // 尾盘集合竞价检测
+    const auctionResults = await detectClosingAuction(list);
+    const auctionMap = {};
+    auctionResults.forEach(r => { auctionMap[r.code] = r; });
     const sigMap = { sell: '🔴 清仓', reduce: '🟠 减仓', hold: '🟡 持有', buy: '🟢 买入' };
     const sigCls = { sell: 'down', reduce: 'down', hold: 'flat', buy: 'up' };
     const bgMap = { sell: '#2d0a0a', reduce: '#2d1f0a', hold: '#0d1117', buy: '#0a2d1a' };
@@ -509,8 +602,14 @@ async function loadWatchlistSignals() {
           // 尾盘异动
           const tail = tailMap[s.code];
           const tailBadge = tail ? `<div style="font-size:9px;color:${tail.level==='critical'?'#ea3943':tail.level==='warning'?'#f0883e':'#58a6ff'};margin-top:2px" title="${tail.signal.replace(/"/g,'&quot;')}">尾盘${tail.level==='critical'?'🔴砸盘':tail.level==='warning'?'🟠异动':'🔵关注'}</div>` : '';
+          // 早盘资金流向
+          const early = earlyMap[s.code];
+          const earlyBadge = early ? `<div style="font-size:9px;color:${early.level==='critical'?'#ea3943':early.level==='warning'?'#f0883e':early.level==='positive'?'#3fb950':'#58a6ff'};margin-top:2px" title="${early.signal.replace(/"/g,'&quot;')}">早盘${early.level==='critical'?'🔴主力出逃':early.level==='warning'?'🟠资金流出':early.level==='positive'?'🟢资金流入':'🔵关注'}</div>` : '';
+          // 集合竞价
+          const auction = auctionMap[s.code];
+          const auctionBadge = auction ? `<div style="font-size:9px;color:${auction.level==='critical'?'#ea3943':'#f0883e'};margin-top:2px" title="${auction.signal.replace(/"/g,'&quot;')}">集合竞价${auction.level==='critical'?'🔴砸盘':'🟠异动'}</div>` : '';
           return `<tr style="background:${mfBg[mfRisk.level] || bgMap[ev.signal] || '#0d1117'}">
-            <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div>${tailBadge}</td>
+            <td><b>${s.name}</b><div style="font-size:10px;color:#8b949e">${s.code}</div>${tailBadge}${earlyBadge}${auctionBadge}</td>
             <td>${q.price || s.price || '—'}</td>
             <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
             <td class="${posCls}" style="font-size:11px;font-weight:600">${posStr}</td>
@@ -530,11 +629,21 @@ async function loadWatchlistSignals() {
         <div style="color:#a371f7;font-weight:700;margin-bottom:4px">🕐 尾盘半小时异动（14:30-15:00）</div>
         ${tailResults.map(r => `<div style="color:${r.level==='critical'?'#ea3943':r.level==='warning'?'#f0883e':'#58a6ff'};margin-bottom:2px">• <b>${r.name}</b>：${r.signal}</div>`).join('')}
       </div>` : ''}
+      ${earlyResults.length ? `<div style="margin-top:8px;padding:8px;background:#0d1a2d;border:1px solid #58a6ff;border-radius:6px;font-size:11px">
+        <div style="color:#58a6ff;font-weight:700;margin-bottom:4px">☀️ 早盘核心多空资金流向（9:30-11:30）</div>
+        ${earlyResults.map(r => `<div style="color:${r.level==='critical'?'#ea3943':r.level==='warning'?'#f0883e':r.level==='positive'?'#3fb950':'#58a6ff'};margin-bottom:2px">• <b>${r.name}</b>：${r.signal}</div>`).join('')}
+      </div>` : ''}
+      ${auctionResults.length ? `<div style="margin-top:8px;padding:8px;background:#2d1a0d;border:1px solid #f0883e;border-radius:6px;font-size:11px">
+        <div style="color:#f0883e;font-weight:700;margin-bottom:4px">🏁 尾盘集合竞价监测（14:57-15:00）</div>
+        ${auctionResults.map(r => `<div style="color:${r.level==='critical'?'#ea3943':'#f0883e'};margin-bottom:2px">• <b>${r.name}</b>：${r.signal}</div>`).join('')}
+      </div>` : ''}
       <div class="tip-box" style="margin-top:8px;font-size:11px">
         <b>信号说明：</b>🔴清仓(卖出分≥80) | 🟠减仓(≥40) | 🟡持有 | 🟢买入(买入分≥70)<br>
         <b>主力出货：</b>🔴出货(风险分≥50) | 🟠疑似(≥30) | 🟡关注 | 🟢安全<br>
         <b>成交量：</b>天量天价/放量滞涨/缩量阴跌/底部放量<br>
         <b>尾盘异动：</b>🔴砸盘(主力流出>5000万) | 🟠异动(>2000万) | 🔵关注<br>
+        <b>早盘资金：</b>🔴主力出逃(早盘流出>2亿) | 🟠资金流出(>1亿) | 🟢资金流入(>2亿)<br>
+        <b>集合竞价：</b>🔴砸盘(主力流出>5000万+大单占比>70%) | 🟠异动<br>
         <b>失效场景：</b>系统性暴跌 | 黑天鹅事件 | 疑似洗盘（技术分析可能失效）
       </div>
     </div>`;
@@ -656,8 +765,14 @@ async function generateDailyAnalysis() {
   status.textContent = '检测尾盘半小时异动...';
   const tailResults = await detectTailEndSelling(watchlist);
   const tailSummary = buildTailEndSummary(tailResults);
-  status.textContent = 'AI深度分析中（含自选股+大盘+尾盘数据）...';
-  const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary + tailSummary, watchlist.length);
+  status.textContent = '检测早盘核心资金流向...';
+  const earlyResults = await detectEarlySessionFlow(watchlist);
+  const earlySummary = buildEarlyFlowSummary(earlyResults);
+  status.textContent = '检测尾盘集合竞价...';
+  const auctionResults = await detectClosingAuction(watchlist);
+  const auctionSummary = buildAuctionSummary(auctionResults);
+  status.textContent = 'AI深度分析中（含自选股+大盘+尾盘+早盘+集合竞价数据）...';
+  const prompt = buildDailyPrompt(today, marketSnapshot, watchlistSummary + tailSummary + earlySummary + auctionSummary, watchlist.length);
 
   try {
     const aiCfg = getAIConfig();
@@ -748,7 +863,7 @@ function buildDailyPrompt(today, snapshot, watchlistSummary, watchlistCount) {
   const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'});
   const timeStr = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const mkt = snapshot ? `\n## 实时大盘快照\n- 上证指数：${snapshot.sh.price}，涨跌${snapshot.sh.pct}%\n- 深证成指：${snapshot.sz.price}，涨跌${snapshot.sz.pct}%\n- 创业板指：${snapshot.cyb.price}，涨跌${snapshot.cyb.pct}%\n请务必结合以上真实数据展开分析。\n` : '';
-  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. **个人持仓盈亏分析（核心）**：\n   - 基于成本价和当前价的盈亏状态\n   - 持仓市值、成本总额、浮动盈亏金额\n   - 若持仓过大（占总仓位>20%），建议适当减仓分散风险\n   - 若浮亏>15%，必须给出是否止损的明确建议\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **尾盘半小时异动检测**（14:30-15:00）：\n   - 尾盘大单集中抛售 = 砸盘出货信号\n   - 尾盘急速拉升 = 可能是诱多\n   - 尾盘放量滞涨 = 主力对倒\n   - 尾盘缩量阴跌 = 散户恐慌性抛售\n10. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n` : '';
+  const wl = watchlistSummary ? `\n## ⚠️ 自选股持仓分析（必须逐只分析，给出明确操作信号）\n${watchlistSummary}\n\n对每只自选股必须给出：\n1. 当前技术面状态（趋势方向、关键均线位置）\n2. 资金面判断（主力进出方向、散户情绪）\n3. 风险评估（距止损位距离、潜在风险点）\n4. **个人持仓盈亏分析（核心）**：\n   - 基于成本价和当前价的盈亏状态\n   - 持仓市值、成本总额、浮动盈亏金额\n   - 若持仓过大（占总仓位>20%），建议适当减仓分散风险\n   - 若浮亏>15%，必须给出是否止损的明确建议\n5. 明确操作信号（必须选其一）：\n   - 🟢 **建议持有**（附持有理由和目标价）\n   - 🟡 **建议减仓**（附减仓比例和时机）\n   - 🔴 **建议清仓**（附清仓理由和止损价）\n6. 具体操作价位（买入区间、目标价、止损价）\n7. **主力出货判断**（重点）：\n   - 内外盘实战分析：内盘>外盘时主力是否主动卖出\n   - 托单出货：涨停板封单是否真实，散户是否在出逃\n   - 对倒出货：主力是否通过对倒制造放量假象\n   - 压单出货：是否有大单压顶但小单成交的特征\n   - 天量天价：成交量暴增+价格高位 = 顶部信号\n8. **成交量异动**：放量滞涨/缩量阴跌/底部放量/天量天价\n9. **尾盘半小时异动检测**（14:30-15:00）：\n   - 尾盘大单集中抛售 = 砸盘出货信号\n   - 尾盘急速拉升 = 可能是诱多\n   - 尾盘放量滞涨 = 主力对倒\n   - 尾盘缩量阴跌 = 散户恐慌性抛售\n10. **三大失效场景判断**：\n   - 系统性暴跌（个股跌幅>5%，技术分析失效）\n   - 黑天鹅事件（异常放量+暴跌，资金面分析失效）\n   - 疑似洗盘（主力昨日流出今日回补，资金面假信号）\n11. **早盘核心多空资金流向**（9:30-11:30）：\n   - 早盘主力净流入/流出金额和方向\n   - 早盘大单集中度（大单/超大单占比）\n   - 早盘资金流向是建仓还是出货\n   - 早盘走势对全天的预示意义\n12. **尾盘集合竞价监控**（14:57-15:00）：\n   - 集合竞价阶段主力资金流向\n   - 是否存在大资金不计成本砸盘收尾\n   - 集合竞价异动对次日开盘的影响\n   - 尾盘是否有诱多拉抬行为\n` : '';
   return `📅 当前真实日期：${dateStr} ${timeStr}（请基于此日期分析，不要使用其他日期）
 ⚠️ 以下所有数据均为实时获取的最新数据，请以此为准进行分析。
 
@@ -827,10 +942,28 @@ ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清�
 
 ---
 
-## 八、风险事件日历
-## 九、今日操作策略（仓位+攻防方向）
-## 十、3条交易铁律
-## 十一、免责声明`;
+## 八、☀️ 早盘核心多空资金流向分析（自选股逐只）
+基于11.早盘资金流向，对每只自选股分析：
+1. 早盘主力净流入/流出及方向判断
+2. 早盘大单集中度反映的主力意图
+3. 早盘走势与全天走势的关联性
+4. 若早盘大幅流出，午后是否存在反转可能
+5. 如何根据早盘信号调整午后策略
+
+---
+## 九、🏁 尾盘集合竞价监控（自选股逐只）
+基于12.尾盘集合竞价，对每只自选股分析：
+1. 集合竞价阶段主力资金是否不计成本砸盘收尾
+2. 集合竞价异动对次日开盘的指引
+3. 尾盘拉升是否为诱多，是否需减仓回避
+4. 集合竞价成交量占比反映的筹码交换情况
+
+---
+
+## 十、风险事件日历
+## 十一、今日操作策略（仓位+攻防方向）
+## 十二、3条交易铁律
+## 十三、免责声明`;`;
 }
 
 // 将AI的markdown输出转为HTML
