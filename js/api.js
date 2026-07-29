@@ -301,8 +301,9 @@ async function fetchEMStockDetail(code) {
     const emCode = toEMCode(code);
     const fields = 'f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f163,f167,f168,f169,f170,f171,f173,f177,f183,f184,f185,f186,f187,f188,f189,f190,f191,f192';
     const url = EM_QUOTE_URL+'?secid='+emCode+'&fields='+fields;
-    const text = await fetchWithProxy(url);
-    const json = JSON.parse(text);
+    const res = await fetchWithRetry(url);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
     if (json.data) { setCache('em_'+code, json.data); return json.data; }
   } catch(e) { console.warn('东方财富API失败', e); }
   return null;
@@ -315,8 +316,9 @@ async function fetchEMCapitalFlow(code) {
   try {
     const emCode = toEMCode(code);
     const url = EM_CAPITAL_URL+'?secid='+emCode+'&klt=101&lmt=10&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57';
-    const text = await fetchWithProxy(url);
-    const json = JSON.parse(text);
+    const res = await fetchWithRetry(url);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
     if (json.data && json.data.klines) {
       const result = json.data.klines.map(k => {
         const p = k.split(',');
@@ -337,12 +339,12 @@ async function fetchEMIntradayFlow(code) {
   try {
     const emCode = toEMCode(code);
     const url = EM_INTRADAY_URL+'?secid='+emCode+'&klt=1&lmt=0&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65';
-    const text = await fetchWithProxy(url);
-    const json = JSON.parse(text);
+    const res = await fetchWithRetry(url);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
     if (json.data && json.data.klines) {
       const result = json.data.klines.map(k => {
         const p = k.split(',');
-        // f51时间, f52主力净流入, f53小单净流入, f54中单净流入, f55大单净流入, f56超大单净流入
         return {
           time: p[0] || '',
           main: parseFloat(p[1] || 0) / 1e4,
@@ -355,6 +357,9 @@ async function fetchEMIntradayFlow(code) {
       setCache(cacheKey, result);
       return result;
     }
+  } catch(e) { console.warn('分时资金流向API失败', e); }
+  return null;
+}
   } catch(e) { console.warn('分时资金流向API失败', e); }
   return null;
 }
