@@ -284,11 +284,6 @@ async function fetchIndexData() {
   } catch(e) { console.warn('指数API失败', e); }
   return SAMPLE_INDEX;
 }
-    });
-    if (Object.keys(result).length > 0) { setCache('all_index', result); return result; }
-  } catch(e) { console.warn('指数API失败', e); }
-  return SAMPLE_INDEX;
-}
 
 // 生成模拟K线数据
 function generateKlineData(basePrice, days) {
@@ -385,9 +380,6 @@ async function fetchEMIntradayFlow(code) {
       setCache(cacheKey, result);
       return result;
     }
-  } catch(e) { console.warn('分时资金流向API失败', e); }
-  return null;
-}
   } catch(e) { console.warn('分时资金流向API失败', e); }
   return null;
 }
