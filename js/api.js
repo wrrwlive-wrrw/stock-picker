@@ -242,12 +242,35 @@ function parseQQQuote(text, code) {
 async function fetchIndexData() {
   const cached = getCache('all_index');
   if (cached) return cached;
+  const result = {};
+  // 东方财富直连（HTTPS + CORS）
+  const emCodes = [['sh000001','1.000001'],['sz399001','0.399001'],['sz399006','0.399006']];
+  try {
+    const fetches = emCodes.map(async ([ourCode, emCode]) => {
+      try {
+        const url = EM_QUOTE_URL+'?secid='+emCode+'&fields=f43,f58,f60,f162,f163';
+        const res = await fetchWithRetry(url);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            const d = json.data;
+            result[ourCode] = {
+              name: String(d.f58||''), value: (d.f43||0)/100,
+              change: (d.f162||0)/100, pct: (d.f163||0)/100
+            };
+          }
+        }
+      } catch(e) {}
+    });
+    await Promise.allSettled(fetches);
+    if (Object.keys(result).length > 0) { setCache('all_index', result); return result; }
+  } catch(e) { console.warn('指数新API失败', e); }
+  // 回退腾讯代理
   try {
     const codes = 'sh000001,sz399001,sz399006';
     const url = 'http://qt.gtimg.cn/q=' + codes;
     const text = await fetchWithProxy(url, 'gbk');
     const lines = text.split(';').filter(l => l.trim());
-    const result = {};
     lines.forEach(line => {
       const match = line.match(/v_(\w+)="(.+)"/);
       if (!match) return;
@@ -256,6 +279,11 @@ async function fetchIndexData() {
       if (p.length > 32) {
         result[code] = { name:p[1], value:parseFloat(p[3]), change:parseFloat(p[31]), pct:parseFloat(p[32]) };
       }
+    });
+    if (Object.keys(result).length > 0) { setCache('all_index', result); return result; }
+  } catch(e) { console.warn('指数API失败', e); }
+  return SAMPLE_INDEX;
+}
     });
     if (Object.keys(result).length > 0) { setCache('all_index', result); return result; }
   } catch(e) { console.warn('指数API失败', e); }
