@@ -132,19 +132,7 @@ async function fetchAStockQuote(code) {
     if (res.ok) {
       const json = await res.json();
       if (json.data) {
-        const d = json.data;
-        const prevClose = (d.f60||0) / 100;
-        const price = (d.f43||0) / 100;
-        const rawChange = (d.f162||0) / 100;
-        const rawPct = (d.f163||0) / 100;
-        const result = {
-          name: String(d.f58||''), price: price,
-          change: rawChange || (prevClose ? price - prevClose : 0),
-          pct: rawPct || (prevClose ? (price - prevClose) / prevClose * 100 : 0),
-          volume: (d.f47||0)+'手',
-          high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: prevClose,
-          pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
-        };
+        const result = parseEMQuote(json.data);
         setCache('quote_' + code, result);
         return result;
       }
@@ -189,19 +177,7 @@ async function fetchAStockQuotesBatch(codes) {
       if (!res.ok) return;
       const json = await res.json();
       if (!json.data) return;
-      const d = json.data;
-      const prevClose = (d.f60||0) / 100;
-      const price = (d.f43||0) / 100;
-      const rawChange = (d.f162||0) / 100;
-      const rawPct = (d.f163||0) / 100;
-      results[code] = {
-        name: String(d.f58||''), price: price,
-        change: rawChange || (prevClose ? price - prevClose : 0),
-        pct: rawPct || (prevClose ? (price - prevClose) / prevClose * 100 : 0),
-        volume: (d.f47||0)+'手',
-        high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: prevClose,
-        pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
-      };
+      results[code] = parseEMQuote(json.data);
       setCache('quote_' + code, results[code]);
     } catch(e) {}
   });
@@ -316,6 +292,20 @@ function generateKlineData(basePrice, days) {
 
 // 东方财富API封装
 const EM_QUOTE_URL = 'https://push2.eastmoney.com/api/qt/stock/get';
+
+// 从东方财富原始数据解析涨跌（f162/f163不可信，从f43和f60推算）
+function parseEMQuote(d) {
+  const prevClose = (d.f60||0) / 100;
+  const price = (d.f43||0) / 100;
+  const change = prevClose ? price - prevClose : 0;
+  const pct = prevClose ? change / prevClose * 100 : 0;
+  return {
+    name: String(d.f58||''), price: price, change: change, pct: pct,
+    volume: (d.f47||0)+'手', high: (d.f44||0)/100, low: (d.f45||0)/100,
+    open: (d.f46||0)/100, prevClose: prevClose,
+    pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
+  };
+}
 const EM_CAPITAL_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get';
 const EM_INTRADAY_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/kline/get';
 
