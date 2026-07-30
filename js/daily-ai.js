@@ -185,7 +185,8 @@ function renderDailyAI(el) {
       <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="generateDailyAnalysis()" id="aiBtn">生成今日分析</button>
         <button class="btn btn-blue" onclick="showFallbackNow()">查看离线示例</button>
-        <button class="btn" style="background:#238636;color:#fff" onclick="downloadDailyReport()" id="dlBtn">📥 下载报告</button>
+        <button class="btn" style="background:#238636;color:#fff" onclick="downloadDailyReport()" id="dlBtn">📥 下载MD</button>
+        <button class="btn" style="background:#d4380d;color:#fff" onclick="exportDailyPDF()" id="pdfBtn">📄 导出PDF</button>
         <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : (savedKey ? '点击按钮开始分析' : '未配置API Key，将显示离线分析')}</span>
       </div>
     </div>
@@ -1015,6 +1016,14 @@ function formatAIResult(text) {
   return `<div class="card">${html}</div>`;
 }
 
+// 导出每日分析报告为PDF
+function exportDailyPDF() {
+  const el = document.getElementById('dailyResult');
+  if (!el || !el.innerHTML.trim()) { alert('暂无报告内容，请先生成今日分析'); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  printReportToPDF(today + ' 每日分析报告', el.innerHTML);
+}
+
 // 下载每日分析报告为 .md 文件
 function downloadDailyReport() {
   const el = document.getElementById('dailyResult');
@@ -1035,6 +1044,39 @@ function downloadDailyReport() {
   a.download = today + '_每日分析报告.md';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// 导出报告为PDF（通过浏览器打印→另存为PDF）
+function printReportToPDF(title, contentHTML) {
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:SimSun,'Noto Sans SC','Microsoft YaHei',sans-serif;color:#222;padding:30px;font-size:13px;line-height:1.8}
+h1{font-size:20px;text-align:center;margin-bottom:6px;padding-bottom:10px;border-bottom:2px solid #333}
+.subtitle{text-align:center;color:#888;font-size:12px;margin-bottom:20px}
+h2{font-size:16px;margin:18px 0 8px;padding:6px 10px;background:#f5f5f5;border-left:3px solid #d4380d}
+h3{font-size:14px;margin:14px 0 6px;color:#d4380d}
+h4{font-size:13px;margin:10px 0 4px;color:#333}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11px}
+th,td{border:1px solid #ccc;padding:5px 6px;text-align:center}
+th{background:#f0f0f0;font-weight:bold}
+.up{color:#d4380d}.down{color:#389e0d}.flat{color:#666}
+p{margin:4px 0}.tip-box{border:1px solid #e8e8e8;background:#fafafa;padding:10px;margin:10px 0;border-radius:4px}
+.card{border:1px solid #e8e8e8;padding:12px;margin:12px 0;border-radius:4px;page-break-inside:avoid}
+.card-title{font-size:15px;font-weight:bold;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #eee}
+.factor-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.factor-card{border:1px solid #e8e8e8;padding:8px;border-radius:4px;page-break-inside:avoid}
+.method-section{margin:12px 0}
+b{color:#000}.tag-negative{color:#d4380d}
+@media print{body{padding:15px}@page{margin:1.2cm}}
+</style></head><body>
+<h1>${title}</h1>
+<p class="subtitle">生成时间：${new Date().toLocaleString('zh-CN')} | StockPicker</p>
+${contentHTML}
+<script>window.onload=function(){setTimeout(function(){window.print();setTimeout(function(){window.close()},500)},500)}<\/script>
+</body></html>`);
+  w.document.close();
 }
 
 // 离线兜底分析

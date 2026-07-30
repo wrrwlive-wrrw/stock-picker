@@ -124,7 +124,8 @@ function viewReportDetail(id) {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="color:#e6e6e6;margin:0">${r.title}</h3>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" style="background:#238636;color:#fff" onclick="downloadReportDetail('${r.id}')">📥 下载</button>
+            <button class="btn btn-sm" style="background:#238636;color:#fff" onclick="downloadReportDetail('${r.id}')">📥 下载MD</button>
+            <button class="btn btn-sm" style="background:#d4380d;color:#fff" onclick="exportReportPDF('${r.id}')">📄 导出PDF</button>
             <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="closeReportDetail()">关闭</button>
           </div>
         </div>
@@ -464,4 +465,17 @@ function downloadReportDetail(id) {
   a.download = dateStr + '_' + r.title.replace(/[\\/:*?"<>|]/g, '_') + '.md';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// 导出历史报告为PDF
+function exportReportPDF(id) {
+  const reports = getReportList();
+  const r = reports.find(x => x.id === id);
+  if (!r) return;
+  const dateStr = r.date || new Date(r.createTime).toISOString().slice(0, 10);
+  if (typeof printReportToPDF === 'function') {
+    printReportToPDF(r.title, r.content);
+  } else {
+    alert('PDF导出功能不可用');
+  }
 }
