@@ -123,7 +123,10 @@ function viewReportDetail(id) {
       <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;width:90%;max-width:800px;max-height:80vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="color:#e6e6e6;margin:0">${r.title}</h3>
-          <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="closeReportDetail()">关闭</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" style="background:#238636;color:#fff" onclick="downloadReportDetail('${r.id}')">📥 下载</button>
+            <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="closeReportDetail()">关闭</button>
+          </div>
         </div>
         <div style="color:#8b949e;font-size:12px;margin-bottom:12px">生成时间：${new Date(r.createTime).toLocaleString('zh-CN')}</div>
         <div style="color:#c9d1d9;line-height:1.7;font-size:14px">${content}</div>
@@ -444,4 +447,21 @@ async function doGenerateWatchlistReport() {
   } catch (e) {
     statusEl.innerHTML = `<span style="color:#f85149">生成失败：${e.message}</span>`;
   }
+}
+
+// 下载历史报告详情为 .md 文件
+function downloadReportDetail(id) {
+  const reports = getReportList();
+  const r = reports.find(x => x.id === id);
+  if (!r) return;
+  const dateStr = r.date || new Date(r.createTime).toISOString().slice(0, 10);
+  const raw = r.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
+  const md = lines.join('\n\n');
+  const blob = new Blob(['# ' + r.title + '\n\n生成时间：' + new Date(r.createTime).toLocaleString('zh-CN') + '\n\n---\n\n' + md], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = dateStr + '_' + r.title.replace(/[\\/:*?"<>|]/g, '_') + '.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }

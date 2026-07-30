@@ -185,6 +185,7 @@ function renderDailyAI(el) {
       <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="generateDailyAnalysis()" id="aiBtn">生成今日分析</button>
         <button class="btn btn-blue" onclick="showFallbackNow()">查看离线示例</button>
+        <button class="btn" style="background:#238636;color:#fff" onclick="downloadDailyReport()" id="dlBtn">📥 下载报告</button>
         <span style="font-size:12px;color:#8b949e;line-height:32px" id="aiStatus">${cached ? '今日已生成，可重新生成' : (savedKey ? '点击按钮开始分析' : '未配置API Key，将显示离线分析')}</span>
       </div>
     </div>
@@ -1012,6 +1013,28 @@ function formatAIResult(text) {
   for (let i = 0; i < cardCount; i++) html += '</div>';
 
   return `<div class="card">${html}</div>`;
+}
+
+// 下载每日分析报告为 .md 文件
+function downloadDailyReport() {
+  const el = document.getElementById('dailyResult');
+  if (!el || !el.innerHTML.trim()) { alert('暂无报告内容，请先生成今日分析'); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const raw = el.innerText || el.textContent || '';
+  const lines = raw.split('\n').filter(l => l.trim());
+  const md = lines.map(l => {
+    const t = l.trim();
+    if (el.innerHTML.includes('<div class="card-title">') && t === t.toUpperCase() && t.length > 2) return '## ' + t;
+    if (t.startsWith('•')) return '- ' + t.slice(1).trim();
+    if (t.match(/^[①②③④⑤⑥⑦⑧⑨⑩]/)) return '### ' + t;
+    return t;
+  }).join('\n\n');
+  const blob = new Blob(['# ' + today + ' 每日分析报告\n\n' + md], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = today + '_每日分析报告.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // 离线兜底分析
