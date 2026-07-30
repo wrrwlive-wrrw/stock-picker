@@ -20,6 +20,49 @@ function setCache(key, data) {
   localStorage.setItem('stock_cache_' + CACHE_VER + '_' + key, JSON.stringify({ data, time: Date.now() }));
 }
 
+// 重试fetch：最多重试2次，指数退避
+async function fetchWithRetry(url, options = {}, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
+      if (res.ok) return res;
+      if (res.status === 429 && i < retries) {
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+        continue;
+      }
+      return res;
+    } catch(e) {
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      else throw e;
+    }
+  }
+}
+
+// 带多代理fallback的fetch（支持GBK/GB2312编码）
+async function fetchWithProxy(url, encoding) {
+  if (url.startsWith('https://')) {
+    try {
+      const res = await fetchWithRetry(url);
+      if (res.ok) {
+        if (encoding) { const buf = await res.arrayBuffer(); return new TextDecoder(encoding).decode(buf); }
+        return await res.text();
+      }
+    } catch(e) {}
+  }
+  for (const proxy of CORS_PROXIES) {
+    try {
+      const res = await fetchWithRetry(proxy + encodeURIComponent(url));
+      if (!res.ok) continue;
+      if (encoding) {
+        const buf = await res.arrayBuffer();
+        return new TextDecoder(encoding).decode(buf);
+      }
+      return await res.text();
+    } catch(e) { continue; }
+  }
+  throw new Error('所有代理均不可用');
+}
+
 // A股指数示例数据（API不可用时兜底）
 const SAMPLE_INDEX = {
   sh000001: { name:'上证指数', value:3256.78, change:12.35, pct:0.38 },
