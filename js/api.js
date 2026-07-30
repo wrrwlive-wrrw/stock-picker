@@ -6,62 +6,18 @@ const CORS_PROXIES = [
   'https://corsproxy.io/?',
   'https://api.codetabs.com/v1/proxy?quest='
 ];
-const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+const CACHE_DURATION = 5 * 60 * 1000;
+const CACHE_VER = 'v2';
 
-// 重试fetch：最多重试2次，指数退避
-async function fetchWithRetry(url, options = {}, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
-      if (res.ok) return res;
-      if (res.status === 429 && i < retries) {
-        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
-        continue;
-      }
-      return res;
-    } catch(e) {
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-      else throw e;
-    }
-  }
-}
-
-// 带多代理fallback的fetch（支持GBK/GB2312编码）
-async function fetchWithProxy(url, encoding) {
-  // HTTPS API优先直连（东方财富支持CORS，无需代理）
-  if (url.startsWith('https://')) {
-    try {
-      const res = await fetchWithRetry(url);
-      if (res.ok) {
-        if (encoding) { const buf = await res.arrayBuffer(); return new TextDecoder(encoding).decode(buf); }
-        return await res.text();
-      }
-    } catch(e) {}
-  }
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const res = await fetchWithRetry(proxy + encodeURIComponent(url));
-      if (!res.ok) continue;
-      if (encoding) {
-        const buf = await res.arrayBuffer();
-        return new TextDecoder(encoding).decode(buf);
-      }
-      return await res.text();
-    } catch(e) { continue; }
-  }
-  throw new Error('所有代理均不可用');
-}
-
-// 缓存读取
 function getCache(key) {
-  const item = localStorage.getItem('stock_cache_' + key);
+  const item = localStorage.getItem('stock_cache_' + CACHE_VER + '_' + key);
   if (!item) return null;
   const { data, time } = JSON.parse(item);
-  if (Date.now() - time > CACHE_DURATION) { localStorage.removeItem('stock_cache_' + key); return null; }
+  if (Date.now() - time > CACHE_DURATION) { localStorage.removeItem('stock_cache_' + CACHE_VER + '_' + key); return null; }
   return data;
 }
 function setCache(key, data) {
-  localStorage.setItem('stock_cache_' + key, JSON.stringify({ data, time: Date.now() }));
+  localStorage.setItem('stock_cache_' + CACHE_VER + '_' + key, JSON.stringify({ data, time: Date.now() }));
 }
 
 // A股指数示例数据（API不可用时兜底）
