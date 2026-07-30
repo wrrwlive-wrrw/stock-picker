@@ -26,7 +26,9 @@ async function getMarketContext() {
 
 // 主评估函数（增强版：结合成本价+行业分析+企业基本面+资金流向+技术信号）
 function evaluateWatchStock(stock, marketCtx, realTimeData) {
-  const price = parseFloat(stock.price) || 0;
+  const rtQuote = realTimeData && realTimeData.quote;
+  const price = rtQuote ? parseFloat(rtQuote.price) : (parseFloat(stock.price) || 0);
+  const rtPct = rtQuote ? parseFloat(rtQuote.pct) : 0;
   const addPrice = parseFloat(stock.addPrice) || price;
   const costPrice = parseFloat(stock.costPrice) || addPrice;
   const targetPrice = parseFloat(stock.targetPrice) || 0;
@@ -43,7 +45,7 @@ function evaluateWatchStock(stock, marketCtx, realTimeData) {
   const val = getValuationData(stock.code) || {pe:0,peAvg:30,high52w:0};
   const industryAvg = val.peAvg || val.industryAvg || 30;
   // 使用实时换手率（如果有）
-  const turnover = (realTimeData && realTimeData.turnover) ? realTimeData.turnover : (Math.random() * 8 + 1).toFixed(1);
+  const turnover = (realTimeData && realTimeData.quote && realTimeData.quote.volume) ? realTimeData.quote.volume.replace('手','') : ((realTimeData && realTimeData.turnover) ? realTimeData.turnover : (Math.random() * 8 + 1).toFixed(1));
   const flow1d = parseFloat((cap.main||'0').replace(/[^0-9.\-]/g,'')) || 0;
   const flow5d = parseFloat((cap.days5||'0').replace(/[^0-9.\-]/g,'')) || 0;
 

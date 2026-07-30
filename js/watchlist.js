@@ -222,8 +222,29 @@ async function loadDailyReport(list) {
   if (!list.length) { dailyArea.innerHTML = ''; return; }
   try {
     if (typeof getMarketContext === 'function') {
-      const marketCtx = await getMarketContext();
-      dailyArea.innerHTML = renderExitAlerts(list, marketCtx) + renderDailyReport(list, marketCtx);
+      const [marketCtx, quotesMap] = await Promise.all([
+        getMarketContext(),
+        fetchAStockQuotesBatch(list.map(s => s.code)).catch(() => ({}))
+      ]);
+      const realTimeMap = {};
+      list.forEach(s => {
+        const q = quotesMap[s.code];
+        realTimeMap[s.code] = q ? { quote: q, capitalFlow: null, turnover: q.volume } : null;
+      });
+      dailyArea.innerHTML = renderExitAlerts(list, marketCtx, realTimeMap) + renderDailyReport(list, marketCtx, realTimeMap);
+      // 异步补资金流
+      for (const s of list) {
+        try {
+          const capFlow = await fetchEMCapitalFlow(s.code);
+          if (capFlow && capFlow.length) {
+            const latest = capFlow[capFlow.length - 1];
+            if (realTimeMap[s.code]) realTimeMap[s.code].capitalFlow = { main: latest.main };
+            else realTimeMap[s.code] = { quote: null, capitalFlow: { main: latest.main }, turnover: null };
+          }
+        } catch(e) {}
+        await new Promise(r => setTimeout(r, 150));
+      }
+      dailyArea.innerHTML = renderExitAlerts(list, marketCtx, realTimeMap) + renderDailyReport(list, marketCtx, realTimeMap);
     } else {
       dailyArea.innerHTML = '';
     }
@@ -529,24 +550,31 @@ function editWatchStock(code) {
 }
 
 // 每日体检报告
-function renderDailyReport(list, marketCtx) {
-  const evaluations = list.map(s => ({ stock: s, ev: evaluateWatchStock(s, marketCtx) }));
+function renderDailyReport(list, marketCtx, realTimeMap) {
+  const evaluations = list.map(s => ({ stock: s, ev: evaluateWatchStock(s, marketCtx, realTimeMap ? realTimeMap[s.code] : null) }));
   return `<div class="card">
     <div class="card-title">📊 每日体检报告</div>
     <div style="padding:8px 12px;background:#0d1117;border-radius:6px;margin-bottom:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <span style="color:${marketCtx.color};font-weight:700">大盘环境：${marketCtx.desc}</span>
-      <span style="font-size:12px;color:#8b949e">上证${marketCtx.shPct>0?'+':''}${marketCtx.shPct}% | 创业板${marketCtx.cybPct>0?'+':''}${marketCtx.cybPct}%</span>
+      <span style="font-size:12px;color:#8b949e">上证${marketCtx.shPct>0?'+':''}${marketCtx.shPct}% | 深证${marketCtx.szPct>0?'+':''}${marketCtx.szPct}% | 创业板${marketCtx.cybPct>0?'+':''}${marketCtx.cybPct}%</span>
     </div>
     <div style="overflow-x:auto"><table class="data-table">
-      <tr><th>股票</th><th>信号</th><th>卖出分</th><th>买入分</th><th>换手率</th><th>资金</th><th>交易建议</th></tr>
+      <tr><th>股票</th><th>现价</th><th>涨跌%</th><th>信号</th><th>卖出分</th><th>买入分</th><th>换手率</th><th>资金</th><th>交易建议</th></tr>
       ${evaluations.map(({stock:s, ev}) => {
         const sigMap = {sell:'🔴 清仓',reduce:'🟠 减仓',hold:'🟡 持有',buy:'🟢 买入'};
         const sigCls = {sell:'down',reduce:'down',hold:'flat',buy:'up'};
+        const rt = realTimeMap ? realTimeMap[s.code] : null;
+        const q = rt ? rt.quote : null;
+        const price = q ? q.price : (s.price || '—');
+        const pct = q ? q.pct : '';
+        const pctCls = pct >= 0 ? 'up' : 'down';
         return `<tr>
           <td><b>${s.name}</b></td>
+          <td style="font-weight:bold">${price}</td>
+          <td class="${pctCls}" style="font-weight:bold">${pct ? (pct>=0?'+':'')+pct+'%' : '—'}</td>
           <td class="${sigCls[ev.signal]||'flat'}">${sigMap[ev.signal]||'持有'}</td>
           <td class="down">${ev.sellScore}</td><td class="up">${ev.buyScore}</td>
-          <td>${ev.turnover}%</td>
+          <td>${ev.turnover}${ev.turnover && isNaN(ev.turnover) ? '' : '手'}</td>
           <td class="${ev.capital.main.startsWith('+')?'up':'down'}">${ev.capital.main}</td>
           <td style="font-size:12px">${ev.tradeAction}</td>
         </tr>`;
@@ -559,10 +587,10 @@ function renderDailyReport(list, marketCtx) {
 }
 
 // 退出预警（只显示需要卖出/减仓的股票）
-function renderExitAlerts(list, marketCtx) {
+function renderExitAlerts(list, marketCtx, realTimeMap) {
   const alerts = [];
   list.forEach(s => {
-    const ev = evaluateWatchStock(s, marketCtx);
+    const ev = evaluateWatchStock(s, marketCtx, realTimeMap ? realTimeMap[s.code] : null);
     if (ev.signal === 'sell' || ev.signal === 'reduce') {
       const risk = predictRisk(s, ev);
       alerts.push({ stock: s, evaluation: ev, risk });
