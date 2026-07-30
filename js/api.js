@@ -133,10 +133,16 @@ async function fetchAStockQuote(code) {
       const json = await res.json();
       if (json.data) {
         const d = json.data;
+        const prevClose = (d.f60||0) / 100;
+        const price = (d.f43||0) / 100;
+        const rawChange = (d.f162||0) / 100;
+        const rawPct = (d.f163||0) / 100;
         const result = {
-          name: String(d.f58||''), price: (d.f43||0)/100, change: (d.f162||0)/100,
-          pct: (d.f163||0)/100, volume: (d.f47||0)+'手',
-          high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: (d.f60||0)/100,
+          name: String(d.f58||''), price: price,
+          change: rawChange || (prevClose ? price - prevClose : 0),
+          pct: rawPct || (prevClose ? (price - prevClose) / prevClose * 100 : 0),
+          volume: (d.f47||0)+'手',
+          high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: prevClose,
           pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
         };
         setCache('quote_' + code, result);
@@ -186,9 +192,13 @@ async function fetchAStockQuotesBatch(codes) {
       const d = json.data;
       const prevClose = (d.f60||0) / 100;
       const price = (d.f43||0) / 100;
+      const rawChange = (d.f162||0) / 100;
+      const rawPct = (d.f163||0) / 100;
       results[code] = {
-        name: String(d.f58||''), price: price, change: (d.f162||0)/100,
-        pct: (d.f163||0)/100, volume: (d.f47||0)+'手',
+        name: String(d.f58||''), price: price,
+        change: rawChange || (prevClose ? price - prevClose : 0),
+        pct: rawPct || (prevClose ? (price - prevClose) / prevClose * 100 : 0),
+        volume: (d.f47||0)+'手',
         high: (d.f44||0)/100, low: (d.f45||0)/100, open: (d.f46||0)/100, prevClose: prevClose,
         pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
       };

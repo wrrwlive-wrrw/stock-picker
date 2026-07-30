@@ -32,7 +32,17 @@ async function renderTSignal(el) {
     }
     const tableCard = document.getElementById('tsignalTable');
     if (tableCard) tableCard.innerHTML = renderTSignalTable(list, quotesMap, capResults, marketCtx).match(/<div id="tsignalTable">([\s\S]*)<\/div>/)?.[1] || '';
-  }, 30000);
+  }, 60000);
+}
+
+// 手动刷新做T信号
+async function manualRefreshTSignal() {
+  const el = document.getElementById('mainContent');
+  if (!el) return;
+  const btn = document.getElementById('tsignalRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '刷新中...'; }
+  await renderTSignal(el);
+  if (btn) { btn.disabled = false; btn.textContent = '🔄 手动刷新'; }
 }
 
 function renderTSignalTable(list, quotesMap, capResults, marketCtx) {
@@ -69,7 +79,8 @@ function renderTSignalTable(list, quotesMap, capResults, marketCtx) {
       <span style="font-size:12px;color:#8b949e">上证 ${marketCtx.shPct>0?'+':''}${marketCtx.shPct}%</span>
       <span style="background:#3fb95022;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:12px">正T机会 ${buyCount} 只</span>
       <span style="background:#ea394322;color:#ea3943;padding:2px 8px;border-radius:4px;font-size:12px">反T机会 ${sellCount} 只</span>
-      <span style="font-size:11px;color:#8b949e">⏱ 每30秒自动刷新</span>
+      <span style="font-size:11px;color:#8b949e">⏱ 每60秒自动刷新</span>
+      <button class="btn btn-sm" id="tsignalRefreshBtn" style="background:#1f6feb;color:#fff;font-size:11px" onclick="manualRefreshTSignal()">🔄 手动刷新</button>
     </div>
     <div id="tsignalTable" style="overflow-x:auto"><table class="data-table" style="font-size:13px">
       <tr><th>股票</th><th>现价</th><th>涨跌%</th><th>振幅</th><th>主力资金</th><th>做T信号</th><th>策略说明</th><th>置信度</th></tr>
