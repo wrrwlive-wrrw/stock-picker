@@ -69,9 +69,57 @@ function addToWatchlist(code, name, price, reason, methods, costPrice) {
 
 // 移除自选股
 function removeFromWatchlist(code) {
+  const list = getWatchlist();
+  const stock = list.find(s => s.code === code);
+  if (!stock) return;
+  if (!confirm(`确定删除自选股「${stock.name}」(${code})？`)) return;
+  const newList = list.filter(s => s.code !== code);
+  saveWatchlist(newList);
+  renderWatchlist(document.getElementById('mainContent'));
+}
+
+// 批量删除自选股
+function batchRemoveWatchlist() {
+  const list = getWatchlist();
+  if (!list.length) { alert('自选股列表为空'); return; }
+  const html = list.map(s => `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #21262d;cursor:pointer">
+    <input type="checkbox" class="batch-del-cb" value="${s.code}">
+    <span>${s.name} (${s.code})</span>
+    <span style="font-size:11px;color:#8b949e">${s.reason ? s.reason.slice(0,20) : ''}</span>
+  </label>`).join('');
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1020;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;width:90%;max-width:400px;max-height:70vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0;color:#e6e6e6">批量删除自选股</h3>
+      <button class="btn btn-sm" style="background:#30363d;color:#e6e6e6" onclick="this.closest('#batchDelOverlay')?.remove()??this.parentElement.parentElement.parentElement.remove()">关闭</button>
+    </div>
+    <div style="color:#8b949e;font-size:12px;margin-bottom:8px">共 ${list.length} 只，勾选要删除的股票：</div>
+    <div style="margin-bottom:8px">
+      <button class="btn btn-sm" onclick="document.querySelectorAll('.batch-del-cb').forEach(c=>c.checked=true)" style="font-size:11px">全选</button>
+      <button class="btn btn-sm" onclick="document.querySelectorAll('.batch-del-cb').forEach(c=>c.checked=false)" style="font-size:11px">取消</button>
+    </div>
+    ${html}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn" style="background:#da3633;color:#fff;flex:1" onclick="batchRemoveConfirm(this)">删除选中</button>
+      <button class="btn" style="background:#30363d;color:#e6e6e6;flex:1" onclick="this.closest('[style*=\\'z-index\\']')?.remove()">取消</button>
+    </div>
+  </div>`;
+  overlay.id = 'batchDelOverlay';
+  document.body.appendChild(overlay);
+}
+
+function batchRemoveConfirm(btn) {
+  const checked = document.querySelectorAll('.batch-del-cb:checked');
+  if (!checked.length) { alert('请至少选择一只股票'); return; }
+  const codes = [...checked].map(c => c.value);
+  if (!confirm(`确定删除 ${codes.length} 只自选股？`)) return;
   let list = getWatchlist();
-  list = list.filter(s => s.code !== code);
+  list = list.filter(s => !codes.includes(s.code));
   saveWatchlist(list);
+  const overlay = document.getElementById('batchDelOverlay');
+  if (overlay) overlay.remove();
   renderWatchlist(document.getElementById('mainContent'));
 }
 
@@ -133,6 +181,7 @@ function renderWatchlist(el) {
           <button class="btn" style="background:#238636;color:#fff" onclick="exportWatchlist()">导出自选股</button>
           <button class="btn" style="background:#1f6feb;color:#fff" onclick="document.getElementById('importFileInput').click()">导入自选股</button>
           <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importWatchlist(event)">
+          <button class="btn" style="background:#da3633;color:#fff" onclick="batchRemoveWatchlist()">批量删除</button>
         </span>
       </div>
       ${list.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
