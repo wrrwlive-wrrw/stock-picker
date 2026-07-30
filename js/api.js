@@ -173,8 +173,8 @@ function parseQQQuote(text, code) {
   const parts = text.split('~');
   if (parts.length < 45) return SAMPLE_STOCKS[code] || null;
   return {
-    name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parseFloat(parts[31]).toFixed(2)),
-    pct: parseFloat(parseFloat(parts[32]).toFixed(2)), volume: parts[6] + '手', high: parseFloat(parts[33]),
+    name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
+    pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
     low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
     pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
   };
@@ -196,11 +196,10 @@ async function fetchIndexData() {
           const json = await res.json();
           if (json.data) {
             const d = json.data;
-            const prevClose = (d.f60||0) / 100;
-            const value = (d.f43||0) / 100;
-            const change = prevClose ? Math.round((value - prevClose) * 100) / 100 : 0;
-            const pct = prevClose ? Math.round((value - prevClose) / prevClose * 10000) / 100 : 0;
-            result[ourCode] = { name: String(d.f58||''), value: value, change: change, pct: pct };
+            result[ourCode] = {
+              name: String(d.f58||''), value: (d.f43||0)/100,
+              change: (d.f162||0)/100, pct: (d.f163||0)/100
+            };
           }
         }
       } catch(e) {}
@@ -220,7 +219,7 @@ async function fetchIndexData() {
       const [, code, data] = match;
       const p = data.split('~');
       if (p.length > 32) {
-        result[code] = { name:p[1], value:parseFloat(p[3]), change:parseFloat(parseFloat(p[31]).toFixed(2)), pct:parseFloat(parseFloat(p[32]).toFixed(2)) };
+        result[code] = { name:p[1], value:parseFloat(p[3]), change:parseFloat(p[31]), pct:parseFloat(p[32]) };
       }
     });
     if (Object.keys(result).length > 0) { setCache('all_index', result); return result; }
@@ -254,8 +253,8 @@ const EM_QUOTE_URL = 'https://push2.eastmoney.com/api/qt/stock/get';
 function parseEMQuote(d) {
   const prevClose = (d.f60||0) / 100;
   const price = (d.f43||0) / 100;
-  const change = prevClose ? Math.round((price - prevClose) * 100) / 100 : 0;
-  const pct = prevClose ? Math.round((price - prevClose) / prevClose * 10000) / 100 : 0;
+  const change = prevClose ? price - prevClose : 0;
+  const pct = prevClose ? change / prevClose * 100 : 0;
   return {
     name: String(d.f58||''), price: price, change: change, pct: pct,
     volume: (d.f47||0)+'手', high: (d.f44||0)/100, low: (d.f45||0)/100,
