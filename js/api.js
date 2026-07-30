@@ -199,7 +199,8 @@ async function fetchAStockQuotesBatch(codes) {
             name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
             pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
             low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
-            pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
+            pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0,
+            turnover: parseFloat(parts[38]) || 0, volRatio: 0
           };
           setCache('quote_' + code, results[code]);
         }
@@ -219,7 +220,8 @@ function parseQQQuote(text, code) {
     name: parts[1], price: parseFloat(parts[3]), change: parseFloat(parts[31]),
     pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
     low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
-    pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0
+    pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0,
+    turnover: parseFloat(parts[38]) || 0, volRatio: 0
   };
 }
 
@@ -302,7 +304,8 @@ function parseEMQuote(d) {
     name: String(d.f58||''), price: price, change: change, pct: pct,
     volume: (d.f47||0)+'手', high: (d.f44||0)/100, low: (d.f45||0)/100,
     open: (d.f46||0)/100, prevClose: prevClose,
-    pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0
+    pe: parseFloat(d.f183||0)/100 || 0, pb: parseFloat(d.f187||0)/100 || 0,
+    turnover: parseFloat(d.f168||0)/100 || 0, volRatio: parseFloat(d.f169||0)/100 || 0
   };
 }
 const EM_CAPITAL_URL = 'https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get';
