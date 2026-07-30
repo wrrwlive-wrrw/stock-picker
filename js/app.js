@@ -14,6 +14,7 @@ const MENUS = {
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
     {id:'ai-agent',label:'🧠 AI智能体'},
+    {id:'tsignal',label:'⚡ 做T信号'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'reports',label:'📋 分析报告'},
     {id:'research',label:'📺 资料研究'},
@@ -28,6 +29,7 @@ const MENUS = {
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
     {id:'ai-agent',label:'🧠 AI智能体'},
+    {id:'tsignal',label:'⚡ 做T信号'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'reports',label:'📋 分析报告'},
     {id:'research',label:'📺 资料研究'},
@@ -41,6 +43,7 @@ const MENUS = {
     {id:'market',label:'🏠 大盘总览'},
     {id:'daily',label:'🤖 每日分析'},
     {id:'ai-agent',label:'🧠 AI智能体'},
+    {id:'tsignal',label:'⚡ 做T信号'},
     {id:'watchlist',label:'⭐ 自选股'},
     {id:'reports',label:'📋 分析报告'},
     {id:'research',label:'📺 资料研究'},
@@ -118,6 +121,7 @@ function navigate(page) {
     case 'market': renderMarket(content); break;
     case 'daily': renderDailyAI(content); break;
     case 'ai-agent': renderAIAgent(content); break;
+    case 'tsignal': renderTSignal(content); break;
     case 'watchlist': renderWatchlist(content); break;
     case 'methodology': renderMethodology(content); break;
     case 'macro': renderMacro(content); break;

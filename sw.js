@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stock-picker-v8';
+const CACHE_NAME = 'stock-picker-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/strategy.js',
   './js/recommend.js',
   './js/trade-signal.js',
+  './js/t-signal.js',
   './js/watchlist.js',
   './js/daily-ai.js',
   './js/ai-stock-agent.js',
