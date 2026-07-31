@@ -163,17 +163,21 @@ function renderTurnover() {
 }
 
 async function fetchTencentMA() {
-  const codes = ST_CODES.map(c => c.startsWith('sh') ? c : c.startsWith('sz') ? c : c).join(',');
-  try {
-    const text = await fetchWithProxy('http://qt.gtimg.cn/q=' + codes, 'gbk');
-    const result = {}; const lines = text.split(';').filter(l => l.trim());
-    lines.forEach(line => {
-      const m = line.match(/v_(\w+)="(.+)"/); if (!m) return;
-      const parts = m[2].split('~'); const code = m[1];
-      if (parts.length >= 23) result[code] = { ma5: parseFloat(parts[20])||0, ma10: parseFloat(parts[21])||0, ma20: parseFloat(parts[22])||0 };
-    });
-    return result;
-  } catch(e) { return {}; }
+  const result = {};
+  await Promise.allSettled(ST_CODES.map(async code => {
+    try {
+      const emCode = code.startsWith('sh') ? '1.' + code.slice(2) : code.startsWith('sz') ? '0.' + code.slice(2) : code;
+      const url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+emCode+'&klt=101&fqt=1&lmt=30&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f53';
+      const res = await fetchWithRetry(url);
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      const json = await res.json();
+      if (!json.data || !json.data.klines || !json.data.klines.length) return;
+      const closes = json.data.klines.map(k => parseFloat(k.split(',')[1])).filter(v => v > 0);
+      const avg = n => closes.length >= n ? closes.slice(-n).reduce((a, b) => a + b, 0) / n : 0;
+      result[code] = { ma5: avg(5), ma10: avg(10), ma20: avg(20) };
+    } catch(e) {}
+  }));
+  return result;
 }
 
 function renderMA() {

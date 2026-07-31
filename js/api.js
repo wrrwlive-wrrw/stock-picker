@@ -200,7 +200,7 @@ async function fetchAStockQuotesBatch(codes) {
             pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
             low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
             pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0,
-            turnover: parseFloat(parts[38]) || 0, volRatio: 0
+            turnover: parseFloat(parts[38]) || 0, volRatio: parseFloat(parts[49]) || 0
           };
           setCache('quote_' + code, results[code]);
         }
@@ -221,7 +221,7 @@ function parseQQQuote(text, code) {
     pct: parseFloat(parts[32]), volume: parts[6] + '手', high: parseFloat(parts[33]),
     low: parseFloat(parts[34]), open: parseFloat(parts[5]), prevClose: parseFloat(parts[4]),
     pe: parseFloat(parts[39]) || 0, pb: parseFloat(parts[46]) || 0,
-    turnover: parseFloat(parts[38]) || 0, volRatio: 0
+    turnover: parseFloat(parts[38]) || 0, volRatio: parseFloat(parts[49]) || 0
   };
 }
 
@@ -275,29 +275,21 @@ async function fetchIndexData() {
 // 获取腾讯均线数据（MA5/MA10/MA20/MA60），GBK编码
 async function fetchStockMAs(codes) {
   if (!codes || !codes.length) return {};
-  try {
-    const text = await fetchWithProxy('http://qt.gtimg.cn/q=' + codes.join(','), 'gbk');
-    const result = {};
-    const lines = text.split(';').filter(l => l.trim());
-    lines.forEach(line => {
-      const m = line.match(/v_(\w+)="(.+)"/);
-      if (!m) return;
-      const parts = m[2].split('~');
-      const code = m[1];
-      if (parts.length >= 24) {
-        result[code] = {
-          ma5: parseFloat(parts[20]) || 0,
-          ma10: parseFloat(parts[21]) || 0,
-          ma20: parseFloat(parts[22]) || 0,
-          ma60: parseFloat(parts[23]) || 0
-        };
-      }
-    });
-    return result;
-  } catch(e) {
-    console.warn('均线数据获取失败', e.message);
-    return {};
-  }
+  const result = {};
+  await Promise.allSettled(codes.map(async code => {
+    try {
+      const emCode = toEMCode(code);
+      const url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+emCode+'&klt=101&fqt=1&lmt=90&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f53';
+      const res = await fetchWithRetry(url);
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      const json = await res.json();
+      if (!json.data || !json.data.klines || !json.data.klines.length) return;
+      const closes = json.data.klines.map(k => parseFloat(k.split(',')[1])).filter(v => v > 0);
+      const avg = n => closes.length >= n ? closes.slice(-n).reduce((a, b) => a + b, 0) / n : 0;
+      result[code] = { ma5: avg(5), ma10: avg(10), ma20: avg(20), ma60: avg(60) };
+    } catch(e) { console.warn('均线获取失败 '+code, e.message); }
+  }));
+  return result;
 }
 
 // 生成模拟K线数据

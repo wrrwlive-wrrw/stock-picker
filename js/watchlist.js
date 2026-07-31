@@ -294,10 +294,92 @@ async function refreshWatchlistRealTime() {
   }
 }
 
+// 成交量格式化（含量比）
+function fmtVolume(q) {
+  if (!q) return '—';
+  const v = q.volume;
+  let volStr = '—';
+  const n = parseFloat(v);
+  if (typeof v === 'string' && v.indexOf('万') >= 0) volStr = v;
+  else if (n > 0) volStr = n >= 10000 ? (n / 10000).toFixed(1) + '万手' : Math.round(n) + '手';
+  const vr = parseFloat(q.volRatio) || 0;
+  const vrColor = vr >= 1.5 ? '#3fb950' : vr >= 1 ? '#8b949e' : '#f0883e';
+  return volStr + '<div style="font-size:10px;color:' + vrColor + '">量比' + (vr ? vr.toFixed(2) : '—') + '</div>';
+}
+
+// 买卖信号：近5日主力资金 + 量比 + 当日涨跌综合评分
+function getTradeSignal(q, capFlow) {
+  const cur = parseFloat(q.price) || 0;
+  const pct = q.pct !== undefined ? parseFloat(q.pct) : 0;
+  const volRatio = parseFloat(q.volRatio) || 0;
+  if (!cur) return { signal: 'none', label: '—', score: 0, reasons: ['数据不足'] };
+  let score = 0;
+  let d5 = 0;
+  const reasons = [];
+  if (capFlow && capFlow.length) {
+    d5 = capFlow.slice(-5).reduce((s, d) => s + (d.main || 0), 0);
+    const last = capFlow[capFlow.length - 1].main || 0;
+    if (d5 > 0.3) { score += 30; reasons.push('5日主力净流入' + d5.toFixed(2) + '亿'); }
+    else if (d5 > 0) { score += 15; reasons.push('5日主力小幅流入'); }
+    else if (d5 < -0.3) { score -= 30; reasons.push('5日主力净流出' + Math.abs(d5).toFixed(2) + '亿'); }
+    else if (d5 < 0) { score -= 15; reasons.push('5日主力小幅流出'); }
+    if (last > 0) { score += 5; reasons.push('今日主力流入' + last.toFixed(2) + '亿'); }
+    else if (last < 0) { score -= 5; reasons.push('今日主力流出' + Math.abs(last).toFixed(2) + '亿'); }
+  }
+  if (volRatio >= 1.5) { score += 20; reasons.push('量比' + volRatio.toFixed(2) + '放量'); }
+  else if (volRatio >= 1.2) { score += 10; reasons.push('量比' + volRatio.toFixed(2)); }
+  else if (volRatio < 0.7) { score -= 5; reasons.push('量比' + volRatio.toFixed(2) + '缩量'); }
+  if (pct >= 3) { score += 15; reasons.push('大涨' + pct.toFixed(2) + '%'); }
+  else if (pct > 0) { score += 8; reasons.push('上涨'); }
+  else if (pct < -3) { score -= 15; reasons.push('大跌' + pct.toFixed(2) + '%'); }
+  else if (pct < 0) { score -= 8; reasons.push('下跌'); }
+  if (pct < 0 && volRatio >= 1.5) { score -= 10; reasons.push('⚠放量下跌'); }
+  if (pct > 0 && volRatio >= 1.2 && d5 > 0) { score += 10; reasons.push('✓量价齐升'); }
+  let signal, label;
+  if (score >= 50) { signal = 'strongBuy'; label = '强烈买入'; }
+  else if (score >= 20) { signal = 'buy'; label = '买入'; }
+  else if (score >= -10) { signal = 'hold'; label = '观望'; }
+  else if (score >= -30) { signal = 'reduce'; label = '减仓'; }
+  else { signal = 'sell'; label = '卖出'; }
+  return { signal, label, score, reasons };
+}
+
+// 买卖信号徽章
+function renderSignalBadge(sig) {
+  if (!sig || !sig.label) return '—';
+  const colors = { strongBuy: '#1f6feb', buy: '#238636', hold: '#8b949e', reduce: '#f0883e', sell: '#ea3943' };
+  const icons = { strongBuy: '⭐', buy: '🟢', sell: '🔴', reduce: '🟠', hold: '' };
+  const c = colors[sig.signal] || '#8b949e';
+  const tip = (sig.reasons || []).join('；');
+  return `<span title="${esc(tip)}" style="background:${c}22;color:${c};border:1px solid ${c}44;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:bold;cursor:help;white-space:nowrap">${icons[sig.signal] || ''}${sig.label}</span><div style="font-size:9px;color:#8b949e;margin-top:2px">评分${sig.score}</div>`;
+}
+
+// 信号统计条
+function renderSignalSummary(list, results) {
+  const counts = {};
+  list.forEach(s => {
+    const r = results[s.code] || {};
+    const sig = getTradeSignal(r.quote || {}, r.capFlow);
+    counts[sig.signal] = (counts[sig.signal] || 0) + 1;
+  });
+  const chips = [
+    ['strongBuy', '⭐强烈买入', '#1f6feb'], ['buy', '🟢买入', '#238636'], ['hold', '观望', '#8b949e'],
+    ['reduce', '🟠减仓', '#f0883e'], ['sell', '🔴卖出', '#ea3943']
+  ].filter(c => counts[c[0]] > 0).map(c =>
+    `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${c[2]}22;color:${c[2]};border:1px solid ${c[2]}44">${c[1]} ${counts[c[0]]}只</span>`).join('');
+  if (!chips) return '';
+  return `<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;color:#8b949e">📊 今日信号</span>${chips}</div>`;
+}
+
 // 使用真实数据渲染表格（股票名称可点击查看详情）
 function renderWatchTableRealTime(list, results, maMap) {
-  return `<div style="overflow-x:auto"><table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成本价</th><th>盈亏</th><th>主力资金</th><th>均线5/10/60</th><th>PE</th><th>状态</th><th>操作</th></tr>
+  const sigMap = {};
+  list.forEach(s => {
+    const r = results[s.code] || {};
+    sigMap[s.code] = getTradeSignal(r.quote || {}, r.capFlow);
+  });
+  return renderSignalSummary(list, results) + `<div style="overflow-x:auto"><table class="data-table">
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成交量</th><th>成本价</th><th>盈亏</th><th>主力资金</th><th>信号</th><th>均线5/10/60</th><th>PE</th><th>状态</th><th>操作</th></tr>
     ${list.map(s => {
       const r = results[s.code] || {};
       const q = r.quote || {};
@@ -348,9 +430,11 @@ function renderWatchTableRealTime(list, results, maMap) {
         <td><b style="color:#58a6ff;text-decoration:underline">${esc(s.name||'')}</b>${renderMethodTags(s.methods)}</td>
         <td style="font-weight:bold">${cur || '—'}</td>
         <td class="${pctCls}" style="font-weight:bold">${pct ? (pct>=0?'+':'') + pct.toFixed(2) + '%' : '—'}</td>
+        <td>${fmtVolume(q)}</td>
         <td>${costStr}</td>
         <td class="${pnlCls}" style="font-weight:bold">${pnlStr}</td>
         <td class="${mainCls}" style="font-weight:bold">${mainStr}</td>
+        <td style="text-align:center">${renderSignalBadge(sigMap[s.code])}</td>
         <td>${maHtml}</td>
         <td>${pe}</td>
         <td>${statusTag}</td>
@@ -361,7 +445,7 @@ function renderWatchTableRealTime(list, results, maMap) {
       </tr>`;
     }).join('')}
   </table></div>
-  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看详细分析，盈亏基于成本价计算。均线"破"=跌破该均线（红），"上"=站上该均线（绿）</div>`;
+  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看详细分析，盈亏基于成本价计算。均线"破"=跌破该均线（红），"上"=站上该均线（绿）。信号基于近5日主力资金流向+量比+当日涨跌综合评分（悬停查看明细）。</div>`;
 }
 
 // 选股方法颜色映射
