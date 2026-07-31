@@ -274,9 +274,11 @@ async function refreshWatchlistRealTime() {
   const results = {};
   const codes = list.map(s => s.code);
   let quotesMap = {};
+  let maMap = {};
   try {
     quotesMap = await fetchAStockQuotesBatch(codes);
   } catch(e) { console.warn('批量行情失败', e); }
+  try { maMap = await fetchStockMAs(codes); } catch(e) { console.warn('均线获取失败', e); }
   for (const s of list) {
     try {
       const capFlow = await fetchEMCapitalFlow(s.code);
@@ -288,14 +290,14 @@ async function refreshWatchlistRealTime() {
   }
   const tableCard = document.getElementById('watchlistTableCard');
   if (tableCard) {
-    tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results);
+    tableCard.innerHTML = `<div class="card-title">持仓明细 & 实时数据</div>` + renderWatchTableRealTime(list, results, maMap);
   }
 }
 
 // 使用真实数据渲染表格（股票名称可点击查看详情）
-function renderWatchTableRealTime(list, results) {
+function renderWatchTableRealTime(list, results, maMap) {
   return `<div style="overflow-x:auto"><table class="data-table">
-    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成本价</th><th>盈亏</th><th>主力资金</th><th>PE</th><th>状态</th><th>操作</th></tr>
+    <tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌%</th><th>成本价</th><th>盈亏</th><th>主力资金</th><th>均线5/10/60</th><th>PE</th><th>状态</th><th>操作</th></tr>
     ${list.map(s => {
       const r = results[s.code] || {};
       const q = r.quote || {};
@@ -312,6 +314,17 @@ function renderWatchTableRealTime(list, results) {
         const latest = capFlow[capFlow.length - 1];
         mainStr = (latest.main > 0 ? '+' : '') + latest.main.toFixed(2) + '亿';
         mainCls = latest.main >= 0 ? 'up' : 'down';
+      }
+      // 均线状态判断（5日/10日/60日）
+      const ma = maMap ? maMap[s.code] || {} : {};
+      let maHtml = '—';
+      if ((ma.ma5||0) > 0 && (ma.ma10||0) > 0 && (ma.ma60||0) > 0 && cur > 0) {
+        const mk = (label, mv) => {
+          const broken = cur < mv;
+          const color = broken ? '#ea3943' : '#3fb950';
+          return `<span title="${label}日均线 ${mv.toFixed(2)}" style="color:${color};font-size:11px;padding:1px 4px;border-radius:3px;border:1px solid ${color}55">${label}${broken?'破':'上'}</span>`;
+        };
+        maHtml = `<div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap">${mk('MA5',ma.ma5)}${mk('MA10',ma.ma10)}${mk('MA60',ma.ma60)}</div>`;
       }
       // 成本价和盈亏计算
       let costStr = '—', pnlStr = '—', pnlCls = 'flat';
@@ -338,6 +351,7 @@ function renderWatchTableRealTime(list, results) {
         <td>${costStr}</td>
         <td class="${pnlCls}" style="font-weight:bold">${pnlStr}</td>
         <td class="${mainCls}" style="font-weight:bold">${mainStr}</td>
+        <td>${maHtml}</td>
         <td>${pe}</td>
         <td>${statusTag}</td>
         <td onclick="event.stopPropagation()">
@@ -347,7 +361,7 @@ function renderWatchTableRealTime(list, results) {
       </tr>`;
     }).join('')}
   </table></div>
-  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看详细分析，盈亏基于成本价计算</div>`;
+  <div style="margin-top:8px;font-size:12px;color:#8b949e">💡 点击股票名称可查看详细分析，盈亏基于成本价计算。均线"破"=跌破该均线（红），"上"=站上该均线（绿）</div>`;
 }
 
 // 选股方法颜色映射

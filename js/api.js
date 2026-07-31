@@ -272,6 +272,34 @@ async function fetchIndexData() {
   return SAMPLE_INDEX;
 }
 
+// 获取腾讯均线数据（MA5/MA10/MA20/MA60），GBK编码
+async function fetchStockMAs(codes) {
+  if (!codes || !codes.length) return {};
+  try {
+    const text = await fetchWithProxy('http://qt.gtimg.cn/q=' + codes.join(','), 'gbk');
+    const result = {};
+    const lines = text.split(';').filter(l => l.trim());
+    lines.forEach(line => {
+      const m = line.match(/v_(\w+)="(.+)"/);
+      if (!m) return;
+      const parts = m[2].split('~');
+      const code = m[1];
+      if (parts.length >= 24) {
+        result[code] = {
+          ma5: parseFloat(parts[20]) || 0,
+          ma10: parseFloat(parts[21]) || 0,
+          ma20: parseFloat(parts[22]) || 0,
+          ma60: parseFloat(parts[23]) || 0
+        };
+      }
+    });
+    return result;
+  } catch(e) {
+    console.warn('均线数据获取失败', e.message);
+    return {};
+  }
+}
+
 // 生成模拟K线数据
 function generateKlineData(basePrice, days) {
   const data = [];
