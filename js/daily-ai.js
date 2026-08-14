@@ -541,7 +541,11 @@ async function loadWatchlistSignals() {
       const ev = evaluateWatchStock(enrichedStock, marketCtx, rtData);
       // 主力出货风险评估（用近5日资金流趋势）
       const mfRisk = assessMainForceRisk(capFlow, parseFloat(q.price) || 0, parseFloat(q.pct) || 0, parseFloat(q.volume) || 0);
-      return { stock: s, quote: q, evaluation: ev, mfRisk };
+      // 资金陷阱检测（复用每日体检 getCapitalRisk）
+      const todayMain = latestCap && typeof latestCap.main === 'number' ? latestCap.main : 0;
+      const prevMain = q.prevMain !== undefined && q.prevMain !== null ? q.prevMain : null;
+      const capRisk = typeof getCapitalRisk === 'function' ? getCapitalRisk(q, { main: todayMain, prevMain: prevMain, days: capFlow }, ev) : null;
+      return { stock: s, quote: q, evaluation: ev, mfRisk, capRisk };
     });
     // 按主力出货风险+信号综合排序
     const riskOrder = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -572,17 +576,24 @@ async function loadWatchlistSignals() {
     const mfCls = { critical: 'down', high: 'down', medium: 'flat', low: 'up' };
     // 收集所有失效场景
     const allFailures = evaluations.flatMap(e => e.mfRisk.failureScenarios.map(f => ({ ...f, stock: e.stock.name })));
+    const capRisks = evaluations.filter(e => e.capRisk).map(e => ({ name: e.stock.name, risk: e.capRisk }));
+    const trapSummary = capRisks.length ? `<div style="margin-bottom:8px;padding:8px 12px;border:1px solid #ea3943;border-radius:6px;background:#1a0a0a">
+      <div style="color:#ea3943;font-weight:700;margin-bottom:4px">🚨 主力资金异动风险</div>
+      ${capRisks.map(r => `<span title="${r.risk.text}" style="display:inline-block;margin:2px 4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;color:${r.risk.color};background:${r.risk.color}22;border:1px solid ${r.risk.color}44;cursor:help">${r.name} ${r.risk.icon}${r.risk.label}</span>`).join('')}
+    </div>` : '';
     area.innerHTML = `<div class="card" style="border-left:3px solid #f0883e">
       <div class="card-title">⚡ 自选股实时信号（${list.length}只）</div>
       <div style="font-size:12px;color:#8b949e;margin-bottom:8px">大盘环境：<span style="color:${marketCtx.color}">${marketCtx.desc}</span></div>
+      ${trapSummary}
       <div style="overflow-x:auto"><table class="data-table" style="font-size:12px">
-        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>持仓</th><th>信号</th><th>主力资金</th><th>主力出货</th><th>成交量</th><th>操作建议</th></tr>
-        ${evaluations.map(({stock:s, quote:q, evaluation:ev, mfRisk}) => {
+        <tr><th>股票</th><th>现价</th><th>涨跌</th><th>持仓</th><th>信号</th><th>主力资金(今/昨)</th><th>主力出货</th><th>成交量</th><th>操作建议</th></tr>
+        ${evaluations.map(({stock:s, quote:q, evaluation:ev, mfRisk, capRisk}) => {
           const pct = q.pct !== undefined ? q.pct : '—';
           const pctCls = parseFloat(pct) >= 0 ? 'up' : 'down';
           const cap = ev.capital || {};
-          const mainStr = cap.main || '—';
-          const mainCls = (typeof mainStr === 'string' && mainStr.startsWith('+')) ? 'up' : 'down';
+          const todayMain = q.capitalFlow && typeof q.capitalFlow.main === 'number' ? q.capitalFlow.main : (parseFloat((cap.main||'0').replace(/[^0-9.\-]/g,'')) || 0);
+          const prevMain = q.prevMain !== undefined && q.prevMain !== null ? q.prevMain : null;
+          const mainHtml = `<div>今 <b class="${todayMain>=0?'up':'down'}">${todayMain>=0?'+':''}${todayMain.toFixed(2)}亿</b></div>${prevMain !== null ? `<div style="font-size:10px;color:#8b949e">昨 ${prevMain>=0?'+':''}${prevMain.toFixed(2)}亿</div>` : ''}${capRisk ? `<div style="font-size:9px;color:${capRisk.color};font-weight:bold" title="${capRisk.text.replace(/"/g,'&quot;')}">${capRisk.icon}${capRisk.label}</div>` : ''}`;
           // 持仓盈亏
           const costNum = parseFloat(s.costPrice || s.addPrice) || 0;
           const curNum = parseFloat(q.price) || 0;
@@ -624,7 +635,7 @@ async function loadWatchlistSignals() {
             <td class="${pctCls}">${pct !== '—' ? (parseFloat(pct)>=0?'+':'') + pct + '%' : '—'}</td>
             <td class="${posCls}" style="font-size:11px;font-weight:600">${posStr}</td>
             <td class="${sigCls[ev.signal]||'flat'}" style="font-weight:700">${sigMap[ev.signal]||'持有'}</td>
-            <td class="${mainCls}">${mainStr}</td>
+            <td>${mainHtml}</td>
             <td class="${mfClsVal}" style="font-size:11px">${mfStr}<div style="font-size:9px;color:#8b949e;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mfDetail.replace(/"/g,'&quot;')}">${mfDetail}</div>${failBadge}</td>
             <td class="${volCls}" style="font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${volStr.replace(/"/g,'&quot;')}">${volStr.length > 15 ? volStr.slice(0,15) + '...' : volStr}</td>
             <td style="font-size:11px">${ev.tradeAction}</td>
@@ -654,6 +665,7 @@ async function loadWatchlistSignals() {
         <b>尾盘异动：</b>🔴砸盘(主力流出>5000万) | 🟠异动(>2000万) | 🔵关注<br>
         <b>早盘资金：</b>🔴主力出逃(早盘流出>2亿) | 🟠资金流出(>1亿) | 🟢资金流入(>2亿)<br>
         <b>集合竞价：</b>🔴砸盘(主力流出>5000万+大单占比>70%) | 🟠异动<br>
+        <b>资金陷阱：</b>🚨诱多陷阱(昨日进场今日暴跌≥5%) | ⚠️昨日进场今日大跌(≥3%) | ⚠️拉高出货 | ⚠️主力出逃(流出>1亿) | 🟠三日连续流出<br>
         <b>失效场景：</b>系统性暴跌 | 黑天鹅事件 | 疑似洗盘（技术分析可能失效）
       </div>
     </div>`;
