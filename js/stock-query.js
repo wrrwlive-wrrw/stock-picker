@@ -174,7 +174,115 @@ async function renderDeepAnalysis(code, data) {
   </div>`;
 
   const researchHtml = renderResearchLinks(code, data.name || '');
-  el.innerHTML = analysisHtml + capitalHtml + investingHtml + linksHtml + researchHtml;
+  const klineData = await fetchStockKline(code, 90);
+  const tradeTimingHtml = klineData && klineData.length ? renderTradeTiming(code, data, klineData, capData) : '';
+  el.innerHTML = tradeTimingHtml + analysisHtml + capitalHtml + investingHtml + linksHtml + researchHtml;
+}
+
+// 买卖时机：基于真实K线/量能/资金流直接给出买卖信号与进出场点位
+function renderTradeTiming(code, data, kline, capData) {
+  const price = parseFloat(data.price) || 0;
+  if (!price) return '';
+  const closes = kline.map(k => k.close).filter(v => v > 0);
+  const vols = kline.map(k => k.volume).filter(v => v > 0);
+  const highs = kline.map(k => k.high).filter(v => v > 0);
+  const lows = kline.map(k => k.low).filter(v => v > 0);
+  const avg = (arr, n) => arr.length >= n ? arr.slice(-n).reduce((a, b) => a + b, 0) / n : 0;
+  const ma5 = avg(closes, 5), ma10 = avg(closes, 10), ma20 = avg(closes, 20), ma60 = avg(closes, 60);
+  const prevMA5 = closes.length >= 6 ? closes.slice(-6, -1).reduce((a, b) => a + b, 0) / 5 : 0;
+  const prevMA10 = closes.length >= 11 ? closes.slice(-11, -1).reduce((a, b) => a + b, 0) / 10 : 0;
+  const crossUp = prevMA5 > 0 && prevMA10 > 0 && prevMA5 <= prevMA10 && ma5 > ma10;
+  const crossDown = prevMA5 > 0 && prevMA10 > 0 && prevMA5 >= prevMA10 && ma5 < ma10;
+  const vol5 = avg(vols, 5), vol20 = avg(vols, 20);
+  const volRatioK = vol20 > 0 ? vol5 / vol20 : 0;
+  const todayVol = vols[vols.length - 1] || 0;
+  const volToday = vol5 > 0 ? todayVol / vol5 : 0;
+  const recentHigh60 = Math.max(...highs.slice(-60));
+  const recentLow60 = Math.min(...lows.slice(-60));
+  const support1 = Math.min(...lows.slice(-10));
+  const resistance1 = Math.max(...highs.slice(-10));
+  const pct = parseFloat(data.pct) || 0;
+  const volRatioQ = parseFloat(data.volRatio) || 0;
+  const turnover = parseFloat(data.turnover) || 0;
+  const capFlow = capData && capData.length ? capData : null;
+  const mainToday = capFlow ? capFlow[capFlow.length - 1].main : 0;
+  const main5 = capFlow ? capFlow.slice(-5).reduce((s, d) => s + d.main, 0) : 0;
+
+  let score = 0;
+  const reasons = [];
+  const arrUp = ma5 > ma10 && ma10 > ma20 && ma20 > ma60;
+  const arrDown = ma5 < ma10 && ma10 < ma20 && ma20 < ma60;
+  if (arrUp) { score += 25; reasons.push('多头排列 MA5>MA10>MA20>MA60'); }
+  else if (arrDown) { score -= 25; reasons.push('空头排列'); }
+  if (crossUp) { score += 20; reasons.push('MA5金叉MA10'); }
+  if (crossDown) { score -= 20; reasons.push('MA5死叉MA10'); }
+  if (price > ma20) { score += 10; reasons.push('站上20日线'); }
+  else { score -= 10; reasons.push('跌破20日线'); }
+  if (volRatioK > 1.2) { score += 10; reasons.push('近5日放量'); }
+  if (volToday > 1.5 && pct > 0) { score += 10; reasons.push('今日放量上涨'); }
+  if (volToday > 1.5 && pct < 0) { score -= 15; reasons.push('今日放量下跌'); }
+  if (main5 > 0.3) { score += 15; reasons.push('5日主力净流入' + main5.toFixed(2) + '亿'); }
+  else if (main5 < -0.3) { score -= 15; reasons.push('5日主力净流出' + Math.abs(main5).toFixed(2) + '亿'); }
+  if (volRatioQ >= 1.5) { score += 10; reasons.push('量比' + volRatioQ.toFixed(2)); }
+  if (pct >= 3) { score += 10; } else if (pct <= -3) { score -= 10; }
+  if (mainToday > 0.3 && pct < -2) { score -= 10; reasons.push('主力流入但股价下跌'); }
+
+  let signal, label, color, advise;
+  if (score >= 50) { signal = '强烈买入'; label = '强势信号 — 可积极建仓'; color = '#16c784'; }
+  else if (score >= 25) { signal = '买入'; label = '偏多信号 — 可轻仓介入'; color = '#238636'; }
+  else if (score >= -10) { signal = '观望'; label = '中性信号 — 等待方向明确'; color = '#d29922'; }
+  else if (score >= -35) { signal = '减仓'; label = '偏空信号 — 建议逢高减仓'; color = '#f0883e'; }
+  else { signal = '卖出'; label = '空头信号 — 建议离场规避'; color = '#ea3943'; }
+  const inBull = score >= 25;
+  const entryPoint = inBull ? (price > ma10 ? Math.max(ma10, ma20).toFixed(2) : price.toFixed(2)) : '暂不进场';
+  const stopPoint = inBull ? (Math.min(ma20 * 0.97, support1 * 0.98)).toFixed(2) : (support1 * 0.98).toFixed(2);
+  const targetPoint = inBull ? (resistance1 > price ? resistance1.toFixed(2) : (recentHigh60 * 0.98).toFixed(2)) : '—';
+
+  return `<div class="card">
+    <div class="card-title">⏱️ 买卖时机（真实K线 + 量能 + 资金流）</div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="padding:10px 18px;background:${color}22;border-left:4px solid ${color};border-radius:4px">
+        <div style="font-size:12px;color:#8b949e">综合买卖信号（评分 ${score}）</div>
+        <div style="font-size:24px;font-weight:700;color:${color}">${signal}</div>
+        <div style="font-size:11px;color:#8b949e">${label}</div>
+      </div>
+      <div style="padding:10px 18px;background:#0d1117;border-radius:4px">
+        <div style="font-size:12px;color:#8b949e">进场位</div>
+        <div style="font-size:18px;font-weight:700;color:#3fb950">${entryPoint}</div>
+        <div style="font-size:11px;color:#8b949e">${inBull ? '回踩均线介入' : '信号转多后再进'}</div>
+      </div>
+      <div style="padding:10px 18px;background:#0d1117;border-radius:4px">
+        <div style="font-size:12px;color:#8b949e">止损位</div>
+        <div style="font-size:18px;font-weight:700;color:#ea3943">${stopPoint}</div>
+        <div style="font-size:11px;color:#8b949e">跌破${stopPoint}离场</div>
+      </div>
+      <div style="padding:10px 18px;background:#0d1117;border-radius:4px">
+        <div style="font-size:12px;color:#8b949e">目标位</div>
+        <div style="font-size:18px;font-weight:700;color:#d29922">${targetPoint}</div>
+        <div style="font-size:11px;color:#8b949e">达目标分批止盈</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      ${reasons.map(r => `<span style="font-size:11px;color:${r.includes('流出')||r.includes('跌破')||r.includes('下跌')||r.includes('死叉')?'#ea3943':'#3fb950'};background:#161b22;padding:3px 8px;border-radius:4px">${r}</span>`).join('') || '<span style="color:#8b949e;font-size:12px">数据不足，暂无法给出信号</span>'}
+    </div>
+    <table class="data-table">
+      <tr><th>MA5</th><th>MA10</th><th>MA20</th><th>MA60</th><th>5日量/20日量</th><th>量比</th><th>换手率</th><th>支撑位S1</th><th>压力位R1</th></tr>
+      <tr>
+        <td class="${price >= ma5 ? 'up' : 'down'}">${ma5 ? ma5.toFixed(2) : '—'}</td>
+        <td class="${price >= ma10 ? 'up' : 'down'}">${ma10 ? ma10.toFixed(2) : '—'}</td>
+        <td class="${price >= ma20 ? 'up' : 'down'}">${ma20 ? ma20.toFixed(2) : '—'}</td>
+        <td class="${price >= ma60 ? 'up' : 'down'}">${ma60 ? ma60.toFixed(2) : '—'}</td>
+        <td>${volRatioK ? volRatioK.toFixed(2) : '—'}</td>
+        <td>${volRatioQ ? volRatioQ.toFixed(2) : '—'}</td>
+        <td>${turnover ? turnover + '%' : '—'}</td>
+        <td class="up">${support1.toFixed(2)}</td>
+        <td class="down">${resistance1.toFixed(2)}</td>
+      </tr>
+    </table>
+    <div class="tip-box" style="margin-top:10px;border-left-color:${color}">
+      <b>时机建议：</b>现价 ${price.toFixed(2)}（涨跌 ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%）。${signal}。${inBull ? '回踩进场位可分批建仓，跌破止损位坚决离场；' : '建议观望，待突破压力位或金叉确认后再介入；'}结合TradingView/Finviz确认大级别趋势后执行。
+    </div>
+  </div>`;
 }
 
 // 国际研究资源导航：宏观/财务/盈利预期/买卖时机 四步研究法

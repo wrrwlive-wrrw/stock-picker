@@ -293,6 +293,25 @@ async function fetchStockMAs(codes) {
 }
 
 // 生成模拟K线数据
+// 获取东方财富日K线（真实数据，含成交量），返回 [{date,open,close,high,low,volume}]
+async function fetchStockKline(code, lmt) {
+  const n = lmt || 90;
+  try {
+    const emCode = toEMCode(code);
+    const url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid='+emCode+'&klt=101&fqt=1&lmt='+n+'&end=20500101&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56';
+    const res = await fetchWithRetry(url);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
+    if (json.data && json.data.klines) {
+      return json.data.klines.map(k => {
+        const p = k.split(',');
+        return { date: p[0], open: parseFloat(p[1]), close: parseFloat(p[2]), high: parseFloat(p[3]), low: parseFloat(p[4]), volume: parseFloat(p[5]) };
+      });
+    }
+  } catch(e) { console.warn('K线获取失败', code, e.message); }
+  return null;
+}
+
 function generateKlineData(basePrice, days) {
   const data = [];
   let price = basePrice;
