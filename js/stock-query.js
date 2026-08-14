@@ -162,7 +162,6 @@ async function renderDeepAnalysis(code, data) {
 
   // 数据来源链接
   const codeNum = code.slice(2);
-  const investingCode = code.startsWith('sh') ? `${codeNum}` : `${codeNum}`;
   const linksHtml = `<div class="card">
     <div class="card-title">📊 外部数据源</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -174,7 +173,67 @@ async function renderDeepAnalysis(code, data) {
     </div>
   </div>`;
 
-  el.innerHTML = analysisHtml + capitalHtml + investingHtml + linksHtml;
+  const researchHtml = renderResearchLinks(code, data.name || '');
+  el.innerHTML = analysisHtml + capitalHtml + investingHtml + linksHtml + researchHtml;
+}
+
+// 国际研究资源导航：宏观/财务/盈利预期/买卖时机 四步研究法
+function renderResearchLinks(code, name) {
+  const isCN = /^(sh|sz|bj)/.test(code || '');
+  const pure = (code || '').replace(/^(sh|sz|bj)/, '');
+  const upper = pure.toUpperCase();
+  const n = encodeURIComponent(name || pure);
+  const build = type => {
+    switch (type) {
+      case 'bloomberg':
+        return isCN ? `https://www.bloomberg.com/quote/${upper}:CH` : `https://www.bloomberg.com/quote/${upper}:US`;
+      case 'reuters':
+        return `https://www.reuters.com/site-search/?query=${upper}`;
+      case 'wsj':
+        return isCN ? `https://www.wsj.com/search/term.html?keywords=${n}` : `https://www.wsj.com/market-data/quotes/${upper}`;
+      case 'morningstar':
+        return `https://www.morningstar.com/search?q=${n}`;
+      case 'tikr':
+        return `https://www.tikr.com/company/${upper}`;
+      case 'sec':
+        return `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${upper}&type=10-K&dateb=&owner=include&count=40`;
+      case 'zacks':
+        return isCN ? `https://www.zacks.com/search/?t=${n}` : `https://www.zacks.com/stock/quote/${upper}`;
+      case 'tipranks':
+        return isCN ? `https://www.tipranks.com/search?q=${n}` : `https://www.tipranks.com/stocks/${upper}`;
+      case 'tradingview':
+        return isCN ? `https://www.tradingview.com/chart/?symbol=${code.startsWith('sh')?'SHSE':'SZSE'}%3A${pure}` : `https://www.tradingview.com/symbols/${upper}/`;
+      case 'finviz':
+        return `https://finviz.com/quote.ashx?t=${upper}`;
+    }
+  };
+  const cnOnlyTip = '（该平台主要覆盖美股，A股请点击后站内搜索）';
+  const btn = (label, type, extra) => {
+    const tip = extra || (['sec','finviz','zacks','tipranks','morningstar'].includes(type) && !isCN ? '' : ['sec','finviz','zacks','tipranks','morningstar'].includes(type) ? cnOnlyTip : '');
+    return `<a href="${build(type)}" target="_blank" class="btn btn-blue btn-sm" title="${label}${tip}" style="margin:2px">${label}</a>`;
+  };
+  return `<div class="card">
+    <div class="card-title">🌐 国际研究资源（四步研究法）</div>
+    <table class="data-table" style="margin-top:8px">
+      <tr><th style="width:115px;text-align:left">1. 宏观与新闻</th><td>
+        ${btn('Bloomberg','bloomberg')}${btn('Reuters 路透','reuters')}${btn('WSJ 华尔街日报','wsj')}
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">获取最新事件与政策动态，避开政策/突发雷区</div>
+      </td></tr>
+      <tr><th style="text-align:left">2. 财务与估值</th><td>
+        ${btn('Morningstar','morningstar')}${btn('TIKR','tikr')}${btn('SEC 10-K/10-Q','sec','（美股财报原文）')}
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">确认公司质地与当前估值是否便宜</div>
+      </td></tr>
+      <tr><th style="text-align:left">3. 盈利预期</th><td>
+        ${btn('Zacks','zacks')}${btn('TipRanks','tipranks')}
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">确认华尔街大资金业绩预期方向（上调/下调）</div>
+      </td></tr>
+      <tr><th style="text-align:left">4. 买卖时机</th><td>
+        ${btn('TradingView','tradingview')}${btn('Finviz','finviz','（美股，含多空信号）')}
+        <div style="font-size:11px;color:#8b949e;margin-top:4px">结合K线与量价关系确定进场/出场点位</div>
+      </td></tr>
+    </table>
+    <div style="font-size:11px;color:#8b949e;margin-top:6px">注：SEC/Morningstar/Finviz/Zacks/TipRanks 主要覆盖美股${isCN ? '；TradingView 已按A股代码生成，Bloomberg 使用 :CH 后缀' : ''}。</div>
+  </div>`;
 }
 
 // 英为财情视角：技术分析 + 分析师评级
