@@ -85,9 +85,11 @@ async function fetchWatchlistQuotes() {
       const capData = await fetchEMCapitalFlow(s.code);
       if (capData && capData.length) {
         const latest = capData[capData.length - 1];
+        const prev = capData.length > 1 ? capData[capData.length - 2] : null;
         quotes[s.code] = quotes[s.code] || {};
         quotes[s.code].capitalFlow = latest;
         quotes[s.code].capitalTrend = capData.slice(-5);
+        quotes[s.code].prevMain = prev ? prev.main : null;
       }
     } catch(e) {}
     await new Promise(r => setTimeout(r, 300));
@@ -104,7 +106,13 @@ function buildWatchlistSummary(watchlist, quotes) {
     const pct = q.pct !== undefined ? (q.pct > 0 ? '+' : '') + q.pct + '%' : '未知';
     const pe = q.pe || '—';
     const cap = q.capitalFlow;
-    const capStr = cap ? `主力${cap.main > 0 ? '+' : ''}${cap.main.toFixed(2)}亿` : '资金数据未知';
+    let capStr = '资金数据未知';
+    if (cap) {
+      capStr = `今日主力${cap.main > 0 ? '+' : ''}${cap.main.toFixed(2)}亿`;
+      if (q.prevMain !== null && q.prevMain !== undefined) {
+        capStr += ` / 昨日主力${q.prevMain > 0 ? '+' : ''}${q.prevMain.toFixed(2)}亿`;
+      }
+    }
     // 散户资金流向
     const trend = q.capitalTrend || [];
     let retailStr = '散户数据未知';
@@ -931,6 +939,12 @@ ${watchlistSummary ? '对以上每只自选股给出明确的持有/减仓/清�
    - 系统性暴跌（大盘恐慌，个股分析失效）
    - 黑天鹅事件（突发利空，资金面分析失效）
    - 疑似洗盘（主力假出货真洗盘，资金面假信号）
+5. **主力资金陷阱检测（重点，基于今日/昨日主力对比）**：
+   - 昨日主力大额流入 + 今日股价大跌（≥3%）= 🚨 诱多陷阱，主力昨日进场今日砸盘出货，必须提示规避
+   - 今日主力流入 + 股价下跌 = 拉高出货嫌疑，谨防对倒诱多
+   - 今日主力大幅流出（>1亿）= 主力出逃，建议减仓
+   - 近3日主力连续净流出 = 资金持续撤离，趋势转弱
+   - 用户提示：请逐只核对"今日主力/昨日主力"数据，出现上述任一情形必须醒目标红并给出明确操作建议
 
 ---
 

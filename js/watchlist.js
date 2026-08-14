@@ -238,8 +238,10 @@ async function loadDailyReport(list) {
           const capFlow = await fetchEMCapitalFlow(s.code);
           if (capFlow && capFlow.length) {
             const latest = capFlow[capFlow.length - 1];
-            if (realTimeMap[s.code]) realTimeMap[s.code].capitalFlow = { main: latest.main };
-            else realTimeMap[s.code] = { quote: null, capitalFlow: { main: latest.main }, turnover: null };
+            const prev = capFlow.length > 1 ? capFlow[capFlow.length - 2] : null;
+            const flow = { main: latest.main, prevMain: prev ? prev.main : null, days: capFlow.slice(-6) };
+            if (realTimeMap[s.code]) realTimeMap[s.code].capitalFlow = flow;
+            else realTimeMap[s.code] = { quote: null, capitalFlow: flow, turnover: null };
           }
         } catch(e) {}
         await new Promise(r => setTimeout(r, 150));
@@ -647,17 +649,49 @@ function editWatchStock(code) {
   renderWatchlist(document.getElementById('mainContent'));
 }
 
-// 每日体检报告
+// 主力资金风险检测：昨日进场今日大跌 = 诱多陷阱
+function getCapitalRisk(q, cf, ev) {
+  const pct = q && q.pct !== undefined ? parseFloat(q.pct) : 0;
+  const mainNum = cf && typeof cf.main === 'number' ? cf.main : 0;
+  const prevNum = cf && typeof cf.prevMain === 'number' ? cf.prevMain : null;
+  const days = cf && Array.isArray(cf.days) ? cf.days : [];
+  if (prevNum !== null && pct <= -5) {
+    return { icon:'🚨', label:'诱多陷阱', color:'#ea3943', text:`昨日主力${prevNum>=0?'流入':'流出'}${Math.abs(prevNum).toFixed(2)}亿，今日暴跌${pct.toFixed(1)}%，主力昨日进场今日砸盘出货，立即规避` };
+  }
+  if (prevNum !== null && prevNum > 0 && pct <= -3) {
+    return { icon:'⚠️', label:'昨日进场今日大跌', color:'#ea3943', text:`昨日主力流入${prevNum.toFixed(2)}亿，今日大跌${pct.toFixed(1)}%，疑似诱多/出货` };
+  }
+  if (mainNum > 0.5 && pct < -2) {
+    return { icon:'⚠️', label:'拉高出货嫌疑', color:'#f0883e', text:`今日主力流入${mainNum.toFixed(2)}亿但股价下跌${pct.toFixed(1)}%，谨防对倒诱多` };
+  }
+  if (mainNum < -1) {
+    return { icon:'⚠️', label:'主力出逃', color:'#f0883e', text:`今日主力净流出${Math.abs(mainNum).toFixed(2)}亿，资金撤离` };
+  }
+  if (days.length >= 3 && days.slice(-3).every(d => d.main < 0)) {
+    return { icon:'🟠', label:'三日连续流出', color:'#f0883e', text:'近3日主力资金连续净流出，趋势转弱' };
+  }
+  return null;
+}
+
 function renderDailyReport(list, marketCtx, realTimeMap) {
   const evaluations = list.map(s => ({ stock: s, ev: evaluateWatchStock(s, marketCtx, realTimeMap ? realTimeMap[s.code] : null) }));
+  const riskRows = evaluations.map(({stock:s, ev}) => {
+    const rt = realTimeMap ? realTimeMap[s.code] : null;
+    return { name: s.name, code: s.code, risk: getCapitalRisk(rt ? rt.quote : null, rt ? rt.capitalFlow : null, ev) };
+  }).filter(r => r.risk);
+  const riskSummary = riskRows.length ? `<div style="margin-bottom:10px;padding:8px 12px;border:1px solid #ea3943;border-radius:6px;background:#1a0a0a">
+    <div style="color:#ea3943;font-weight:700;margin-bottom:4px">🚨 主力资金异动风险</div>
+    ${riskRows.map(r => `<span title="${r.risk.text}" style="display:inline-block;margin:2px 4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;color:${r.risk.color};background:${r.risk.color}22;border:1px solid ${r.risk.color}44;cursor:help">${r.name} ${r.risk.icon}${r.risk.label}</span>`).join('')}
+  </div>` : '';
   return `<div class="card">
     <div class="card-title">📊 每日体检报告</div>
     <div style="padding:8px 12px;background:#0d1117;border-radius:6px;margin-bottom:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <span style="color:${marketCtx.color};font-weight:700">大盘环境：${marketCtx.desc}</span>
       <span style="font-size:12px;color:#8b949e">上证${marketCtx.shPct>0?'+':''}${marketCtx.shPct}% | 深证${marketCtx.szPct>0?'+':''}${marketCtx.szPct}% | 创业板${marketCtx.cybPct>0?'+':''}${marketCtx.cybPct}%</span>
     </div>
+    ${riskSummary}
     <div style="overflow-x:auto"><table class="data-table">
-      <tr><th>股票</th><th>现价</th><th>涨跌%</th><th>信号</th><th>卖出分</th><th>买入分</th><th>换手率</th><th>资金</th><th>交易建议</th></tr>
+      <tr><th>股票</th><th>现价</th><th>涨跌%</th><th>信号</th><th>卖出分</th><th>买入分</th><th>换手率</th><th>主力资金(今/昨)</th><th>风险提示</th><th>交易建议</th></tr>
       ${evaluations.map(({stock:s, ev}) => {
         const sigMap = {sell:'🔴 清仓',reduce:'🟠 减仓',hold:'🟡 持有',buy:'🟢 买入'};
         const sigCls = {sell:'down',reduce:'down',hold:'flat',buy:'up'};
@@ -666,6 +700,12 @@ function renderDailyReport(list, marketCtx, realTimeMap) {
         const price = q ? q.price : (s.price || '—');
         const pct = q ? q.pct : '';
         const pctCls = pct >= 0 ? 'up' : 'down';
+        const cf = rt ? rt.capitalFlow : null;
+        const mainNum = cf && typeof cf.main === 'number' ? cf.main : (parseFloat((ev.capital.main||'0').replace(/[^0-9.\-]/g,'')) || 0);
+        const prevNum = cf && typeof cf.prevMain === 'number' ? cf.prevMain : null;
+        const capHtml = `<div>今 <b class="${mainNum>=0?'up':'down'}">${mainNum>=0?'+':''}${mainNum.toFixed(2)}亿</b></div>${prevNum !== null ? `<div style="font-size:10px;color:#8b949e">昨 ${prevNum>=0?'+':''}${prevNum.toFixed(2)}亿</div>` : ''}`;
+        const risk = getCapitalRisk(q, cf, ev);
+        const riskHtml = risk ? `<span title="${risk.text}" style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;color:${risk.color};background:${risk.color}22;border:1px solid ${risk.color}44;cursor:help">${risk.icon} ${risk.label}</span>` : '<span style="color:#8b949e;font-size:11px">—</span>';
         return `<tr>
           <td><b>${s.name}</b></td>
           <td style="font-weight:bold">${price}</td>
@@ -673,13 +713,14 @@ function renderDailyReport(list, marketCtx, realTimeMap) {
           <td class="${sigCls[ev.signal]||'flat'}">${sigMap[ev.signal]||'持有'}</td>
           <td class="down">${ev.sellScore}</td><td class="up">${ev.buyScore}</td>
           <td>${ev.turnover}${ev.turnover && isNaN(ev.turnover) ? '' : '手'}</td>
-          <td class="${ev.capital.main.startsWith('+')?'up':'down'}">${ev.capital.main}</td>
+          <td>${capHtml}</td>
+          <td style="text-align:center">${riskHtml}</td>
           <td style="font-size:12px">${ev.tradeAction}</td>
         </tr>`;
       }).join('')}
     </table></div>
     <div style="margin-top:10px;font-size:11px;color:#8b949e">
-      评分说明：卖出分≥80清仓 | ≥40减仓 | 买入分≥70可加仓 | 每日开盘前查看
+      评分说明：卖出分≥80清仓 | ≥40减仓 | 买入分≥70可加仓 | 每日开盘前查看 | 风险提示：主力资金昨日进场今日大跌为诱多陷阱信号
     </div>
   </div>`;
 }
